@@ -39,7 +39,7 @@ func pipelineErrorFactory(genError generalPiplineError, errorType string) error 
 type PipelineProcessor interface {
 	Initialise() error
 	Terminate() error
-	Process() error
+	Process(data interface{}, outputDataPipe chan<- interface{}) error
 }
 
 type PipelineRoutine struct {
@@ -48,7 +48,7 @@ type PipelineRoutine struct {
 	Cntl RoutineController
 }
 
-func (routine *PipelineRoutine) RunAndGetPipe(inputPipe <-chan interface{}) (outputPipe chan<- interface{}, err error) {
+func (routine *PipelineRoutine) RunAndGetOutputPipe(inputPipe <-chan interface{}) (outputPipe chan<- interface{}, err error) {
 
 	if err := routine.Impl.Initialise(); err != nil {
 		err := pipelineErrorFactory(generalPiplineError{routine.Name, err}, "initialise")
@@ -67,11 +67,13 @@ func (routine *PipelineRoutine) RunAndGetPipe(inputPipe <-chan interface{}) (out
 			select {
 			case <-routine.Cntl.TerminateChan:
 				close(outputPipe)
-				routine.invokeOperationAndLogOnError(PipelineOperation{routine.Impl.Terminate, "terminate"})
+				err = routine.Impl.Initialise()
+				routine.checkAndLogError(err, "initialise")
 				break routineLoop
 
-			case <-inputPipe:
-				routine.invokeOperationAndLogOnError(PipelineOperation{routine.Impl.Process, "process"})
+			case data := <-inputPipe:
+				err = routine.Impl.Process(data, outputPipe)
+				routine.checkAndLogError(err, "process")
 			}
 		}
 	}()
@@ -81,19 +83,14 @@ func (routine *PipelineRoutine) RunAndGetPipe(inputPipe <-chan interface{}) (out
 
 }
 
-type PipelineOperation struct {
-	f    func() error
-	name string
-}
-
-func (routine *PipelineRoutine) invokeOperationAndLogOnError(operation PipelineOperation) {
-	if err := operation.f(); err != nil {
-		err := pipelineErrorFactory(generalPiplineError{routine.Name, err}, operation.name)
+func (routine *PipelineRoutine) checkAndLogError(err error, operationName string) {
+	if err != nil {
+		err := pipelineErrorFactory(generalPiplineError{routine.Name, err}, operationName)
 		routine.Cntl.Log.ErrLog.Println(err.Error())
 	}
 }
 
-func createErrorPipe(errorData error) (pipe chan interface{}) {
+func createErrorPipe(errorData error) (pipe chan<- interface{}) {
 	// Rather than sending back a nil channel in the event of an error
 	// send back a single element buffered channel with the error queued up on it.
 	errorPipe := make(chan interface{}, 1)

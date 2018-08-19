@@ -13,7 +13,7 @@ type MockPipeline struct{}
 func (mockpipe *MockPipeline) Initialise() error {
 	return nil
 }
-func (mockpipe *MockPipeline) Process() error {
+func (mockpipe *MockPipeline) Process(data interface{}, outputPipe chan<- interface{}) error {
 	return nil
 }
 func (mockpipe *MockPipeline) Terminate() error {
@@ -29,7 +29,7 @@ func RunAndGetPipeTest(t *testing.T) {
 	}
 
 	triggerChan := make(chan interface{})
-	_, _ = uut.RunAndGetPipe(triggerChan)
+	_, _ = uut.RunAndGetOutputPipe(triggerChan)
 
 }
 
