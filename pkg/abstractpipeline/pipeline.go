@@ -59,7 +59,6 @@ func (routine *PipelineRoutine) RunAndGetPipe(inputPipe <-chan interface{}) (out
 	routine.Cntl.StartWaitGroup.Done()
 
 	stdout := routine.Cntl.Log.OutLog
-
 	stdout.Println(fmt.Sprintf("%s procesing pipeline started!", routine.Name))
 
 	go func() {
