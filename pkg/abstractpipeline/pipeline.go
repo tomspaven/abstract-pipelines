@@ -48,11 +48,11 @@ type PipelineRoutine struct {
 	Cntl RoutineController
 }
 
-func (routine *PipelineRoutine) RunAndGetOutputPipe(inputPipe <-chan interface{}) (outputPipe chan<- interface{}, err error) {
+func (routine *PipelineRoutine) RunAndGetOutputPipe(inputPipe <-chan interface{}) (outputPipe chan<- interface{}) {
 
 	if err := routine.Impl.Initialise(); err != nil {
 		err := pipelineErrorFactory(generalPiplineError{routine.Name, err}, "initialise")
-		return createErrorPipe(err), err
+		return createErrorPipe(err)
 	}
 
 	outputPipe = make(chan interface{})
@@ -67,19 +67,19 @@ func (routine *PipelineRoutine) RunAndGetOutputPipe(inputPipe <-chan interface{}
 			select {
 			case <-routine.Cntl.TerminateChan:
 				close(outputPipe)
-				err = routine.Impl.Initialise()
+				err := routine.Impl.Initialise()
 				routine.checkAndLogError(err, "initialise")
 				break routineLoop
 
 			case data := <-inputPipe:
-				err = routine.Impl.Process(data, outputPipe)
+				err := routine.Impl.Process(data, outputPipe)
 				routine.checkAndLogError(err, "process")
 			}
 		}
 	}()
 
 	stdout.Println(fmt.Sprintf("%s procesing pipeline terminated!", routine.Name))
-	return outputPipe, nil
+	return outputPipe
 
 }
 
