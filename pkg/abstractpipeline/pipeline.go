@@ -1,37 +1,38 @@
 package abstractpipeline
 
 type PipelineProcessor interface {
-	initialise() error
-	terminate() error
-	process() error
+	Initialise() error
+	Terminate() error
+	Process() error
 }
 
 type PipelineRoutine struct {
-	name string
-	impl PipelineProcessor
-	cntl RoutineController
+	Name string
+	Impl PipelineProcessor
+	Cntl RoutineController
 }
 
 func (routine *PipelineRoutine) RunAndGetPipe(inputDataChan <-chan interface{}) (<-chan interface{}, error) {
+
 	outputDataPipe := make(chan interface{})
-	if err := routine.impl.initialise(); err != nil {
+	if err := routine.Impl.Initialise(); err != nil {
 		return nil, err
 	}
 
-	routine.cntl.StartWaitGroup.Done()
+	routine.Cntl.StartWaitGroup.Done()
 	go func() {
 	routineLoop:
 		for {
 			select {
 
-			case <-routine.cntl.TerminateChan:
+			case <-routine.Cntl.TerminateChan:
 				close(outputDataPipe)
-				if err := routine.impl.terminate(); err != nil {
+				if err := routine.Impl.Terminate(); err != nil {
 				}
 				break routineLoop
 
 			case <-inputDataChan:
-				if err := routine.impl.process(); err != nil {
+				if err := routine.Impl.Process(); err != nil {
 				}
 			}
 		}

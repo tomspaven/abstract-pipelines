@@ -12,6 +12,6 @@ type RoutineController struct {
 }
 
 type Loggers struct {
-	outLog *log.Logger
-	errLog *log.Logger
+	OutLog *log.Logger
+	ErrLog *log.Logger
 }
