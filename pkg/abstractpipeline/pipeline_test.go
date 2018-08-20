@@ -2,10 +2,10 @@ package abstractpipeline_test
 
 import (
 	abspipe "abstract-pipelines/pkg/abstractpipeline"
+	"bytes"
 	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -40,14 +40,44 @@ func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- inte
 	return fmt.Errorf("type assertion failue on data")
 }
 
+type InitErrorer struct{}
+
+func (mockpipe *InitErrorer) Initialise() error {
+	return fmt.Errorf("I threwz an error on initialisation din't i?!")
+}
+func (mockpipe *InitErrorer) Terminate() error { return nil }
+func (mockpipe *InitErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
+	return nil
+}
+
+const (
+	PRINT_ROUTINE  int = 0
+	APPEND_ROUTINE     = iota
+	INIT_ERR_ROUTINE
+)
+
+var routineNameDictionary = map[int]string{
+	PRINT_ROUTINE:    "Print",
+	APPEND_ROUTINE:   "Append",
+	INIT_ERR_ROUTINE: "InitError",
+}
+
+type MockLog struct {
+	Out *bytes.Buffer
+	Err *bytes.Buffer
+}
+
+var mockLog *MockLog
+
 // Basic test
 // Create a two step pipeline:
 // Step 1: Prints input string
 // Step 2: Appends "PIPELINED!" to the string
 // Send a small set of strings to it without termination
 func TestNewAndStopWhenDone(t *testing.T) {
-	inputChan, pipeline := runPrintAndAppendPipeline()
+	inputChan, pipeline, err := makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
 
+	assert.Nilf(t, err, "Error returned when making pipeline")
 	go func() {
 		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
 			inputChan <- datastring
@@ -69,7 +99,9 @@ const terminateTestLengthMilliseconds time.Duration = 50
 // (i.e. printer THEN appender)
 func TestNewAndStopAbruptly(t *testing.T) {
 
-	inputChan, pipeline := runPrintAndAppendPipeline()
+	inputChan, pipeline, err := makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
+	assert.Nilf(t, err, "Unexpected Error returned when making pipeline")
+
 	go func() {
 		for datastring := range generateInfiniteRandomStrings() {
 			inputChan <- datastring
@@ -88,16 +120,17 @@ func TestNewAndStopAbruptly(t *testing.T) {
 	wg.Wait()
 }
 
-const (
-	PRINT_ROUTINE_IDX  int = 0
-	APPEND_ROUTINE_IDX     = iota
-)
+func TestNewWithInitError(t *testing.T) {
+	_, pipeline, err := makePipeline(PRINT_ROUTINE, INIT_ERR_ROUTINE)
+	assert.NotNilf(t, err, "Unexpected Error returned when making pipeline")
+	assert.Nilf(t, pipeline, "Unpexetced pipeline returned, should be nil")
+}
 
-func runPrintAndAppendPipeline() (chan<- interface{}, *abspipe.Pipeline) {
-	routines := generatePrintAndAppendTestRoutines()
+func makePipeline(routineIDs ...int) (chan<- interface{}, *abspipe.Pipeline, error) {
+	routines := generatePipelineRoutines(routineIDs...)
 	inputChan := make(chan interface{})
-	pipeline := abspipe.New(inputChan, routines[PRINT_ROUTINE_IDX], routines[APPEND_ROUTINE_IDX])
-	return inputChan, pipeline
+	pipeline, err := abspipe.New(inputChan, routines...)
+	return inputChan, pipeline, err
 }
 
 func drinkFromStringPipeAndAssert(pipeline *abspipe.Pipeline, t *testing.T, wg *sync.WaitGroup) {
@@ -114,22 +147,33 @@ func drinkFromStringPipeAndAssert(pipeline *abspipe.Pipeline, t *testing.T, wg *
 	}()
 }
 
-func generatePrintAndAppendTestRoutines() []*abspipe.Routine {
-	pipelineControllers := setupRoutineControllers(2)
+func generatePipelineRoutines(testRoutineIDs ...int) []*abspipe.Routine {
+	pipelineControllers := setupRoutineControllers(len(testRoutineIDs))
+	routines := make([]*abspipe.Routine, len(testRoutineIDs))
 
-	printRoutine := &abspipe.Routine{
-		Name: "MockPipeline 1",
-		Impl: &StringPrinter{},
-		Cntl: *pipelineControllers[PRINT_ROUTINE_IDX],
+	for i, id := range testRoutineIDs {
+		routine := createRoutineFactoryMethod(id)
+		routine.Name = routineNameDictionary[id]
+		routine.Cntl = *pipelineControllers[i]
+		routines[i] = routine
 	}
 
-	appendRoutine := &abspipe.Routine{
-		Name: "MockPipeline 2",
-		Impl: &StringAppender{},
-		Cntl: *pipelineControllers[APPEND_ROUTINE_IDX],
-	}
+	return routines
+}
 
-	return []*abspipe.Routine{printRoutine, appendRoutine}
+func createRoutineFactoryMethod(id int) *abspipe.Routine {
+	routine := &abspipe.Routine{}
+	switch id {
+	case PRINT_ROUTINE:
+		routine.Impl = &StringPrinter{}
+	case APPEND_ROUTINE:
+		routine.Impl = &StringAppender{}
+	case INIT_ERR_ROUTINE:
+		routine.Impl = &InitErrorer{}
+	default:
+		routine.Impl = &InitErrorer{}
+	}
+	return routine
 }
 
 func setupRoutineControllers(numberOfRoutines int) []*abspipe.RoutineController {
@@ -137,10 +181,15 @@ func setupRoutineControllers(numberOfRoutines int) []*abspipe.RoutineController 
 	waitGroup := &sync.WaitGroup{}
 	waitGroup.Add(numberOfRoutines)
 
+	mockLog = &MockLog{
+		Out: &bytes.Buffer{},
+		Err: &bytes.Buffer{},
+	}
+
 	logFlags := log.Ldate | log.Ltime | log.Lshortfile
 	loggers := abspipe.Loggers{
-		OutLog: log.New(os.Stdout, "Info:", logFlags),
-		ErrLog: log.New(os.Stderr, "Error:", logFlags),
+		OutLog: log.New(mockLog.Out, "Info:", logFlags),
+		ErrLog: log.New(mockLog.Err, "Error:", logFlags),
 	}
 
 	controllers := make([]*abspipe.RoutineController, numberOfRoutines)

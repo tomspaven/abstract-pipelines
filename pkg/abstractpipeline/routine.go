@@ -32,8 +32,8 @@ type Loggers struct {
 func (routine *Routine) runAndGetOutputPipe(inputPipe <-chan interface{}) <-chan interface{} {
 
 	if err := routine.Impl.Initialise(); err != nil {
-		err := pipelineErrorFactory(generalError{routine.Name, err}, "initialise")
-		return createErrorPipe(err)
+		routine.checkAndLogError(err, "initialise")
+		return nil
 	}
 
 	outputPipe := make(chan interface{})
@@ -70,12 +70,4 @@ func (routine *Routine) checkAndLogError(err error, operationName string) {
 		err := pipelineErrorFactory(generalError{routine.Name, err}, operationName)
 		routine.Cntl.Log.ErrLog.Println(err.Error())
 	}
-}
-
-func createErrorPipe(errorData error) <-chan interface{} {
-	// Rather than sending back a nil channel in the event of an error
-	// send back a single element buffered channel with the error queued up on it.
-	errorPipe := make(chan interface{}, 1)
-	errorPipe <- errorData
-	return errorPipe
 }
