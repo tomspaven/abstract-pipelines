@@ -1,66 +1,42 @@
 package abstractpipeline
 
-import "fmt"
-
 type Processor interface {
 	Initialise() error
 	Terminate() error
 	Process(data interface{}, outputDataPipe chan<- interface{}) error
 }
 
-type Routine struct {
-	Name string
-	Impl Processor
-	Cntl RoutineController
+type Pipeline struct {
+	OutputPipe      <-chan interface{}
+	orderedRoutines []*Routine //  Needed to terminate routines in the correct order.
 }
 
-func (routine *Routine) RunAndGetOutputPipe(inputPipe <-chan interface{}) <-chan interface{} {
+func New(inputPipe <-chan interface{}, routines ...*Routine) *Pipeline {
 
-	if err := routine.Impl.Initialise(); err != nil {
-		err := pipelineErrorFactory(generalError{routine.Name, err}, "initialise")
-		return createErrorPipe(err)
+	pipeline := &Pipeline{
+		OutputPipe:      wirePipeline(inputPipe, routines),
+		orderedRoutines: routines,
 	}
 
-	outputPipe := make(chan interface{})
-	routine.Cntl.StartWaitGroup.Done()
+	return pipeline
+}
 
-	stdout := routine.Cntl.Log.OutLog
-	stdout.Println(fmt.Sprintf("%s procesing pipeline started!", routine.Name))
+func wirePipeline(inputPipe <-chan interface{}, routines []*Routine) <-chan interface{} {
 
-	go func() {
-	routineLoop:
-		for {
-			select {
-			case <-routine.Cntl.TerminateChan:
-				close(outputPipe)
-				err := routine.Impl.Terminate()
-				routine.checkAndLogError(err, "terminate")
-
-				stdout.Println(fmt.Sprintf("%s procesing pipeline terminated!", routine.Name))
-				break routineLoop
-
-			case data := <-inputPipe:
-				err := routine.Impl.Process(data, outputPipe)
-				routine.checkAndLogError(err, "process")
-			}
+	var feedPipe <-chan interface{}
+	for idx, routine := range routines {
+		// Wire the first routine to the inputPipe
+		if idx == 0 {
+			feedPipe = routine.runAndGetOutputPipe(inputPipe)
+			continue
 		}
-	}()
-
-	return outputPipe
-
-}
-
-func (routine *Routine) checkAndLogError(err error, operationName string) {
-	if err != nil {
-		err := pipelineErrorFactory(generalError{routine.Name, err}, operationName)
-		routine.Cntl.Log.ErrLog.Println(err.Error())
+		feedPipe = routine.runAndGetOutputPipe(feedPipe)
 	}
+	return feedPipe
 }
 
-func createErrorPipe(errorData error) <-chan interface{} {
-	// Rather than sending back a nil channel in the event of an error
-	// send back a single element buffered channel with the error queued up on it.
-	errorPipe := make(chan interface{}, 1)
-	errorPipe <- errorData
-	return errorPipe
+func (pipeline *Pipeline) Stop() {
+	for _, routine := range pipeline.orderedRoutines {
+		routine.Cntl.TerminateChan <- struct{}{}
+	}
 }

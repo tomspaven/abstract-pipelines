@@ -33,6 +33,7 @@ func (mockpipe *StringAppender) Initialise() error { return nil }
 func (mockpipe *StringAppender) Terminate() error  { return nil }
 func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- interface{}) error {
 	if stringData, ok := data.(string); ok {
+		//fmt.Println(fmt.Sprintf("\t\t%s PIPELINED data %s", reflect.TypeOf(mockpipe).Name(), stringData))
 		stringData = stringData + " PIPELINED!"
 		outputPipe <- stringData
 		return nil
@@ -45,11 +46,16 @@ func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- inte
 // Step 1: Prints input string
 // Step 2: Appends "PIPELINED!" to the string
 // Send a small set of strings to it without termination
-func TestRunAndGetPipe(t *testing.T) {
-	inputChan, _ := runPrintAndAppendPipeline()
-	for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
-		inputChan <- datastring
-	}
+func TestNew(t *testing.T) {
+	inputChan, pipeline := runPrintAndAppendPipeline()
+
+	go func() {
+		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
+			inputChan <- datastring
+		}
+	}()
+
+	drinkFromStringPipe(pipeline)
 }
 
 const terminateTestLengthMilliseconds time.Duration = 50
@@ -57,42 +63,22 @@ const terminateTestLengthMilliseconds time.Duration = 50
 // Setup same basic pipeline
 // Terminate the pipeline after 50 milliseconds in the same order it was constructed
 // (i.e. printer THEN appender)
-func TestRunAndGetPipeWithForwardTerminate(t *testing.T) {
+func TestNewAndStop(t *testing.T) {
 
-	inputChan, routineControllers := runPrintAndAppendPipeline()
+	inputChan, pipeline := runPrintAndAppendPipeline()
 	go func() {
-		for datastring := range generateInifiteRandomStrings() {
+		for datastring := range generateInfiniteRandomStrings() {
 			inputChan <- datastring
 		}
 	}()
+
+	drinkFromStringPipe(pipeline)
 
 	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
 	<-terminatePipelineTicker.C
 
 	// Terminate print routine then append routine
-	for _, controller := range routineControllers {
-		controller.TerminateChan <- struct{}{}
-	}
-}
-
-// Setup same basic pipeline
-// Terminate the pipeline after 50 milliseconds in the reverse order to how it was constructed
-// (i.e. appender THEN printer)
-func TestRunAndGetPipeWithBackwardTerminate(t *testing.T) {
-
-	inputChan, routineControllers := runPrintAndAppendPipeline()
-	go func() {
-		for datastring := range generateInifiteRandomStrings() {
-			inputChan <- datastring
-		}
-	}()
-
-	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
-	<-terminatePipelineTicker.C
-
-	// Terminate append routine then print routine
-	routineControllers[APPEND_ROUTINE_IDX].TerminateChan <- struct{}{}
-	routineControllers[PRINT_ROUTINE_IDX].TerminateChan <- struct{}{}
+	pipeline.Stop()
 }
 
 const (
@@ -100,24 +86,22 @@ const (
 	APPEND_ROUTINE_IDX     = iota
 )
 
-func runPrintAndAppendPipeline() (chan<- interface{}, []*abspipe.RoutineController) {
+func runPrintAndAppendPipeline() (chan<- interface{}, *abspipe.Pipeline) {
 	routines := generatePrintAndAppendTestRoutines()
 	inputChan := make(chan interface{})
-	go func() {
-		pipelineOutputChannel := routines[APPEND_ROUTINE_IDX].RunAndGetOutputPipe(
-			routines[PRINT_ROUTINE_IDX].RunAndGetOutputPipe(
-				inputChan))
+	pipeline := abspipe.New(inputChan, routines[PRINT_ROUTINE_IDX], routines[APPEND_ROUTINE_IDX])
 
-		for raw := range pipelineOutputChannel {
+	return inputChan, pipeline
+}
+
+func drinkFromStringPipe(pipeline *abspipe.Pipeline) {
+	go func() {
+		for raw := range pipeline.OutputPipe {
 			if _, ok := raw.(string); ok {
-				//fmt.Println(fmt.Sprintf("\t\tGot output %s from pipeline", outputString))
+				//fmt.Println(fmt.Sprintf("\t\t\tgot data %s from pipe", stringData))
 			}
 		}
 	}()
-	return inputChan, []*abspipe.RoutineController{
-		&routines[PRINT_ROUTINE_IDX].Cntl,
-		&routines[APPEND_ROUTINE_IDX].Cntl,
-	}
 }
 
 func generatePrintAndAppendTestRoutines() []*abspipe.Routine {
@@ -160,7 +144,7 @@ func setupRoutineControllers(numberOfRoutines int) []*abspipe.RoutineController 
 	return controllers
 }
 
-func generateInifiteRandomStrings() <-chan string {
+func generateInfiniteRandomStrings() <-chan string {
 	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	randomStringChan := make(chan string)
 	go func() {
