@@ -1,7 +1,7 @@
 package abstractpipeline_test
 
 import (
-	abspipe "abstract-pipelines/pkg/abstractpipeline"
+	"abstract-pipelines/pkg/abstractpipeline"
 	"bytes"
 	"fmt"
 	"log"
@@ -131,10 +131,10 @@ func TestNewWithInitError(t *testing.T) {
 	checkExpectedErrorLogContentAndAssert(t, "I threwz an error")
 }
 
-func makePipeline(routineIDs ...int) (chan<- interface{}, *abspipe.Pipeline, error) {
+func makePipeline(routineIDs ...int) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
 	routines := generatePipelineRoutines(routineIDs...)
 	inputChan := make(chan interface{})
-	pipeline, err := abspipe.New(inputChan, routines...)
+	pipeline, err := abstractpipeline.New(inputChan, routines...)
 	return inputChan, pipeline, err
 }
 
@@ -149,7 +149,7 @@ func checkExpectedErrorLogContentAndAssert(t *testing.T, expectedlogContent stri
 	assert.Containsf(t, logString, expectedlogContent, "Expeted %s in error log, but %s was there", expectedlogContent, logString)
 }
 
-func drinkFromStringPipeAndAssert(pipeline *abspipe.Pipeline, t *testing.T, wg *sync.WaitGroup) {
+func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wg *sync.WaitGroup) {
 
 	go func() {
 		for raw := range pipeline.OutputPipe {
@@ -163,9 +163,9 @@ func drinkFromStringPipeAndAssert(pipeline *abspipe.Pipeline, t *testing.T, wg *
 	}()
 }
 
-func generatePipelineRoutines(testRoutineIDs ...int) []*abspipe.Routine {
+func generatePipelineRoutines(testRoutineIDs ...int) []*abstractpipeline.Routine {
 	pipelineControllers := setupRoutineControllers(len(testRoutineIDs))
-	routines := make([]*abspipe.Routine, len(testRoutineIDs))
+	routines := make([]*abstractpipeline.Routine, len(testRoutineIDs))
 
 	for i, id := range testRoutineIDs {
 		routine := createRoutineFactoryMethod(id)
@@ -177,8 +177,8 @@ func generatePipelineRoutines(testRoutineIDs ...int) []*abspipe.Routine {
 	return routines
 }
 
-func createRoutineFactoryMethod(id int) *abspipe.Routine {
-	routine := &abspipe.Routine{}
+func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
+	routine := &abstractpipeline.Routine{}
 	switch id {
 	case PRINT_ROUTINE:
 		routine.Impl = &StringPrinter{}
@@ -192,7 +192,7 @@ func createRoutineFactoryMethod(id int) *abspipe.Routine {
 	return routine
 }
 
-func setupRoutineControllers(numberOfRoutines int) []*abspipe.RoutineController {
+func setupRoutineControllers(numberOfRoutines int) []*abstractpipeline.RoutineController {
 
 	waitGroup := &sync.WaitGroup{}
 	waitGroup.Add(numberOfRoutines)
@@ -203,14 +203,14 @@ func setupRoutineControllers(numberOfRoutines int) []*abspipe.RoutineController 
 	}
 
 	logFlags := log.Ldate | log.Ltime | log.Lshortfile
-	loggers := abspipe.Loggers{
+	loggers := abstractpipeline.Loggers{
 		OutLog: log.New(mockLog.Out, "Info:", logFlags),
 		ErrLog: log.New(mockLog.Err, "Error:", logFlags),
 	}
 
-	controllers := make([]*abspipe.RoutineController, numberOfRoutines)
+	controllers := make([]*abstractpipeline.RoutineController, numberOfRoutines)
 	for i := 0; i < len(controllers); i++ {
-		controllers[i] = &abspipe.RoutineController{
+		controllers[i] = &abstractpipeline.RoutineController{
 			StartWaitGroup: waitGroup,
 			TerminateChan:  make(chan struct{}),
 			Log:            loggers,
