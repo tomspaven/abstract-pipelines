@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type StringPrinter struct{}
@@ -43,16 +45,21 @@ func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- inte
 // Step 1: Prints input string
 // Step 2: Appends "PIPELINED!" to the string
 // Send a small set of strings to it without termination
-func TestNew(t *testing.T) {
+func TestNewAndStopWhenDone(t *testing.T) {
 	inputChan, pipeline := runPrintAndAppendPipeline()
 
 	go func() {
 		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
 			inputChan <- datastring
 		}
+		pipeline.Stop()
 	}()
 
-	drinkFromStringPipe(pipeline)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	drinkFromStringPipeAndAssert(pipeline, t, wg)
+	wg.Wait()
 }
 
 const terminateTestLengthMilliseconds time.Duration = 50
@@ -60,7 +67,7 @@ const terminateTestLengthMilliseconds time.Duration = 50
 // Setup same basic pipeline but hammer it with an infinite barrage of random strings.
 // Terminate the pipeline after 50 milliseconds in the same order it was constructed
 // (i.e. printer THEN appender)
-func TestNewAndStop(t *testing.T) {
+func TestNewAndStopAbruptly(t *testing.T) {
 
 	inputChan, pipeline := runPrintAndAppendPipeline()
 	go func() {
@@ -69,13 +76,16 @@ func TestNewAndStop(t *testing.T) {
 		}
 	}()
 
-	drinkFromStringPipe(pipeline)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	drinkFromStringPipeAndAssert(pipeline, t, wg)
 
 	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
 	<-terminatePipelineTicker.C
 
-	// Terminate print routine then append routine
 	pipeline.Stop()
+	wg.Wait()
 }
 
 const (
@@ -90,13 +100,17 @@ func runPrintAndAppendPipeline() (chan<- interface{}, *abspipe.Pipeline) {
 	return inputChan, pipeline
 }
 
-func drinkFromStringPipe(pipeline *abspipe.Pipeline) {
+func drinkFromStringPipeAndAssert(pipeline *abspipe.Pipeline, t *testing.T, wg *sync.WaitGroup) {
+
 	go func() {
 		for raw := range pipeline.OutputPipe {
-			if _, ok := raw.(string); ok {
-				//fmt.Println(fmt.Sprintf("\t\t\tgot data %s from pipe", stringData))
-			}
+			obtainedString, ok := raw.(string)
+			assert.Equalf(t, true, ok, "type assertion failure on string pipe expected string")
+
+			checkString := "PIPELINED!"
+			assert.Containsf(t, obtainedString, checkString, "Pipeline processed string %s didn't contain string %s", obtainedString, checkString)
 		}
+		wg.Done()
 	}()
 }
 
