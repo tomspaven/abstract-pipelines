@@ -3,7 +3,6 @@ package abstractpipeline_test
 import (
 	abspipe "abstract-pipelines/pkg/abstractpipeline"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -12,9 +11,7 @@ import (
 	"time"
 )
 
-type StringPrinter struct {
-	out io.Writer
-}
+type StringPrinter struct{}
 
 func (mockpipe *StringPrinter) Initialise() error { return nil }
 func (mockpipe *StringPrinter) Terminate() error  { return nil }
@@ -60,7 +57,7 @@ func TestNew(t *testing.T) {
 
 const terminateTestLengthMilliseconds time.Duration = 50
 
-// Setup same basic pipeline
+// Setup same basic pipeline but hammer it with an infinite barrage of random strings.
 // Terminate the pipeline after 50 milliseconds in the same order it was constructed
 // (i.e. printer THEN appender)
 func TestNewAndStop(t *testing.T) {
@@ -90,7 +87,6 @@ func runPrintAndAppendPipeline() (chan<- interface{}, *abspipe.Pipeline) {
 	routines := generatePrintAndAppendTestRoutines()
 	inputChan := make(chan interface{})
 	pipeline := abspipe.New(inputChan, routines[PRINT_ROUTINE_IDX], routines[APPEND_ROUTINE_IDX])
-
 	return inputChan, pipeline
 }
 

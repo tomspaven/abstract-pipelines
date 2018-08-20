@@ -6,6 +6,18 @@ import (
 	"sync"
 )
 
+type Routine struct {
+	Name string
+	Impl Processor
+	Cntl RoutineController
+}
+
+type Processor interface {
+	Initialise() error
+	Terminate() error
+	Process(data interface{}, outputDataPipe chan<- interface{}) error
+}
+
 type RoutineController struct {
 	StartWaitGroup *sync.WaitGroup
 	TerminateChan  chan struct{}
@@ -15,12 +27,6 @@ type RoutineController struct {
 type Loggers struct {
 	OutLog *log.Logger
 	ErrLog *log.Logger
-}
-
-type Routine struct {
-	Name string
-	Impl Processor
-	Cntl RoutineController
 }
 
 func (routine *Routine) runAndGetOutputPipe(inputPipe <-chan interface{}) <-chan interface{} {
