@@ -90,6 +90,8 @@ func TestNewAndStopWhenDone(t *testing.T) {
 
 	drinkFromStringPipeAndAssert(pipeline, t, wg)
 	wg.Wait()
+
+	checkEmptyErrorLogAndAssert(t) //INVESTIGATE RANDOM FAILURE.....
 }
 
 const terminateTestLengthMilliseconds time.Duration = 50
@@ -118,12 +120,15 @@ func TestNewAndStopAbruptly(t *testing.T) {
 
 	pipeline.Stop()
 	wg.Wait()
+
+	checkEmptyErrorLogAndAssert(t)
 }
 
 func TestNewWithInitError(t *testing.T) {
 	_, pipeline, err := makePipeline(PRINT_ROUTINE, INIT_ERR_ROUTINE)
 	assert.NotNilf(t, err, "Unexpected Error returned when making pipeline")
 	assert.Nilf(t, pipeline, "Unpexetced pipeline returned, should be nil")
+	checkExpectedErrorLogContentAndAssert(t, "I threwz an error")
 }
 
 func makePipeline(routineIDs ...int) (chan<- interface{}, *abspipe.Pipeline, error) {
@@ -131,6 +136,17 @@ func makePipeline(routineIDs ...int) (chan<- interface{}, *abspipe.Pipeline, err
 	inputChan := make(chan interface{})
 	pipeline, err := abspipe.New(inputChan, routines...)
 	return inputChan, pipeline, err
+}
+
+func checkEmptyErrorLogAndAssert(t *testing.T) {
+	bytes := mockLog.Err.Bytes()
+	assert.Equalf(t, 0, len(bytes), "Expeted empty error log, but %s was there", string(bytes))
+}
+
+func checkExpectedErrorLogContentAndAssert(t *testing.T, expectedlogContent string) {
+	bytes := mockLog.Err.Bytes()
+	logString := string(bytes)
+	assert.Containsf(t, logString, expectedlogContent, "Expeted %s in error log, but %s was there", expectedlogContent, logString)
 }
 
 func drinkFromStringPipeAndAssert(pipeline *abspipe.Pipeline, t *testing.T, wg *sync.WaitGroup) {
