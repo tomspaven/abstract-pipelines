@@ -2,40 +2,6 @@ package abstractpipeline
 
 import "fmt"
 
-type generalPiplineError struct {
-	pipelineName  string
-	previousError error
-}
-type PipelineInitialiseError generalPiplineError
-type PipelineProcessError generalPiplineError
-type PipelineTerminateError generalPiplineError
-
-func (e generalPiplineError) Error() string {
-	return fmt.Sprintf("General problem with pipeline %s %s", e.pipelineName, e.previousError.Error())
-}
-func (e *PipelineInitialiseError) Error() string {
-	return fmt.Sprintf("Couldn't initialise pipline %s %s", e.pipelineName, e.previousError.Error())
-}
-func (e *PipelineProcessError) Error() string {
-	return fmt.Sprintf("Processing error for pipeline %s %s", e.pipelineName, e.previousError.Error())
-}
-func (e *PipelineTerminateError) Error() string {
-	return fmt.Sprintf("Problem when terminating pipline %s %s", e.pipelineName, e.previousError.Error())
-}
-
-func pipelineErrorFactory(genError generalPiplineError, errorType string) error {
-	switch errorType {
-	case "initialise":
-		return &PipelineInitialiseError{genError.pipelineName, genError.previousError}
-	case "process":
-		return &PipelineInitialiseError{genError.pipelineName, genError.previousError}
-	case "terminate":
-		return &PipelineInitialiseError{genError.pipelineName, genError.previousError}
-	default:
-		return genError
-	}
-}
-
 type PipelineProcessor interface {
 	Initialise() error
 	Terminate() error
@@ -51,7 +17,7 @@ type PipelineRoutine struct {
 func (routine *PipelineRoutine) RunAndGetOutputPipe(inputPipe <-chan interface{}) (outputPipe chan<- interface{}) {
 
 	if err := routine.Impl.Initialise(); err != nil {
-		err := pipelineErrorFactory(generalPiplineError{routine.Name, err}, "initialise")
+		err := pipelineErrorFactory(generalError{routine.Name, err}, "initialise")
 		return createErrorPipe(err)
 	}
 
@@ -85,7 +51,7 @@ func (routine *PipelineRoutine) RunAndGetOutputPipe(inputPipe <-chan interface{}
 
 func (routine *PipelineRoutine) checkAndLogError(err error, operationName string) {
 	if err != nil {
-		err := pipelineErrorFactory(generalPiplineError{routine.Name, err}, operationName)
+		err := pipelineErrorFactory(generalError{routine.Name, err}, operationName)
 		routine.Cntl.Log.ErrLog.Println(err.Error())
 	}
 }

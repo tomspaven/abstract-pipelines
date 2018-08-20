@@ -2,7 +2,6 @@ package batchfilemonitor
 
 import (
 	pipe "abstract-pipelines/pkg/abstractpipeline"
-	disagg "abstract-pipelines/pkg/disaggregator"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -24,10 +23,10 @@ type Params struct {
 type Monitor struct {
 	pipe.RoutineController
 	Params
-	disagg.Disaggregator
+	Disaggregator
 }
 
-func New(params Params, controller pipe.RoutineController, disaggregator disagg.Disaggregator) *Monitor {
+func New(params Params, controller pipe.RoutineController, disaggregator Disaggregator) *Monitor {
 	return &Monitor{
 		controller,
 		params,
@@ -37,34 +36,30 @@ func New(params Params, controller pipe.RoutineController, disaggregator disagg.
 
 func (monitor *Monitor) WaitForFilesAndDisaggregate() (recordsFromFilePipe chan<- interface{}) {
 
-	fileDetectorPipe := monitor.setupFileTrigger()
+	fileCheckTriggerPipe := monitor.setupFileCheckTrigger()
 	pipelineRoutine := pipe.PipelineRoutine{
 		Name: "Input File Monitor and Disaggregator",
 		Impl: monitor,
 		Cntl: monitor.RoutineController,
 	}
 
-	var err error
-	if recordsFromFilePipe, err = pipelineRoutine.RunAndGetOutputPipe(fileDetectorPipe); err != nil {
-		return createErrorPipe(err)
-	}
+	return pipelineRoutine.RunAndGetOutputPipe(fileCheckTriggerPipe)
 
-	return recordsFromFilePipe
 }
 
-func (monitor *Monitor) setupFileTrigger() <-chan interface{} {
+func (monitor *Monitor) setupFileCheckTrigger() <-chan interface{} {
 	// Need to setup like this as ticker.C is a channel of a concrete type.
-	// This essentially converts the signal and sends on an interface based channel so it can be used with
-	// the pipeline framework
-	triggerChannel := make(chan interface{})
+	// This essentially listens for and converts the ticker signal (sending on an abstract channel)
+	// so it can be used with the pipeline framework
+	fileCheckTriggerChan := make(chan interface{})
 	checkForFileTicker := time.NewTicker(monitor.checkForFileIntervalSeconds * time.Second)
 	go func() {
 		for {
 			time := <-checkForFileTicker.C
-			triggerChannel <- time
+			fileCheckTriggerChan <- time
 		}
 	}()
-	return triggerChannel
+	return fileCheckTriggerChan
 }
 
 func createErrorPipe(errorData error) (pipe chan<- interface{}) {

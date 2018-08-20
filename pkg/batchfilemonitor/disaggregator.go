@@ -1,4 +1,4 @@
-package disaggregator
+package batchfilemonitor
 
 import "io"
 
