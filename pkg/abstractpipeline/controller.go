@@ -7,7 +7,7 @@ import (
 
 type RoutineController struct {
 	StartWaitGroup *sync.WaitGroup
-	TerminateChan  <-chan bool
+	TerminateChan  chan struct{}
 	Log            Loggers
 }
 
