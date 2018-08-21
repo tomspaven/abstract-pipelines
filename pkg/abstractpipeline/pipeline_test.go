@@ -17,37 +17,63 @@ type StringPrinter struct{}
 
 func (mockpipe *StringPrinter) Initialise() error { return nil }
 func (mockpipe *StringPrinter) Terminate() error  { return nil }
+func (mockpipe *StringPrinter) HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{}) {
+	return
+}
 func (mockpipe *StringPrinter) Process(data interface{}, outputPipe chan<- interface{}) error {
-	if stringData, ok := data.(string); ok {
+	stringData, ok := data.(string)
+	if ok {
 		//fmt.Println(fmt.Sprintf("\t%s processed data %s", reflect.TypeOf(mockpipe).Name(), stringData))
 		outputPipe <- stringData
 		return nil
 	}
-	return fmt.Errorf("type assertion failue on data")
+
+	err := abstractpipeline.NewTypeAssertionError("string")
+	err.GenErr.RoutineName = "StringPrinter"
+
+	return err
 }
 
 type StringAppender struct{}
 
 func (mockpipe *StringAppender) Initialise() error { return nil }
 func (mockpipe *StringAppender) Terminate() error  { return nil }
+func (mockpipe *StringAppender) HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{}) {
+	return
+}
 func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- interface{}) error {
-	if stringData, ok := data.(string); ok {
+
+	stringData, ok := data.(string)
+	if ok {
 		//fmt.Println(fmt.Sprintf("\t\t%s PIPELINED data %s", reflect.TypeOf(mockpipe).Name(), stringData))
 		stringData = stringData + " PIPELINED!"
 		outputPipe <- stringData
 		return nil
 	}
-	return fmt.Errorf("type assertion failue on data")
+
+	err := abstractpipeline.NewTypeAssertionError("string")
+	err.GenErr.RoutineName = "StringAppender"
+
+	return err
 }
 
 type InitErrorer struct{}
 
 func (mockpipe *InitErrorer) Initialise() error {
-	return fmt.Errorf("I threwz an error on initialisation din't i?!")
+
+	err := abstractpipeline.NewTerminateError()
+	err.RoutineName = "InitErrorer"
+	err.PreviousError = fmt.Errorf("I threwz an error on initialisation din't i?!")
+
+	return err
+
 }
 func (mockpipe *InitErrorer) Terminate() error { return nil }
 func (mockpipe *InitErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
 	return nil
+}
+func (mockpipe *InitErrorer) HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{}) {
+	return
 }
 
 const (
