@@ -53,6 +53,7 @@ func NewTerminateError() *TerminateError {
 		PreviousError: errors.New(""),
 	}
 }
+
 func (e *TerminateError) Error() string {
 	return fmt.Sprintf("Problem when terminating pipline %s: %s", e.RoutineName, e.PreviousError.Error())
 }
