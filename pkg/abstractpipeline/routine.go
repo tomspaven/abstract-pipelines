@@ -2,78 +2,123 @@ package abstractpipeline
 
 import (
 	"fmt"
-	"log"
 	"sync"
 )
 
 type Routine struct {
 	Name string
 	Impl Processor
-	Cntl RoutineController
+	id   int
+	cntl routineController
 }
 
 type Processor interface {
 	Initialise() error
 	Terminate() error
 	Process(data interface{}, outputDataPipe chan<- interface{}) error
-	HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{})
+	HandleDataProcessError(err error, data interface{}, outputDataPipe chan<- interface{})
 }
 
-type RoutineController struct {
-	StartWaitGroup *sync.WaitGroup
-	TerminateChan  chan struct{}
-	Log            Loggers
+type routineController struct {
+	startWaitGroup *sync.WaitGroup
+	log            Loggers
 }
 
-type Loggers struct {
-	OutLog *log.Logger
-	ErrLog *log.Logger
+type outputPipes struct {
+	dataOut              chan interface{}
+	terminateCallbackOut chan chan struct{}
+	errOut               chan error
 }
 
-func (routine *Routine) runAndGetOutputPipe(inputPipe <-chan interface{}) <-chan interface{} {
+type inputPipes struct {
+	dataIn              chan interface{}
+	terminateCallbackIn chan chan struct{}
+}
 
-	if err := routine.Impl.Initialise(); err != nil {
-		routine.checkAndLogError(err)
-		return nil
+func (routine *Routine) startAndGetOutputPipes(inPipes *inputPipes) (*outputPipes, error) {
+
+	outPipes := &outputPipes{
+		dataOut:              make(chan interface{}),
+		terminateCallbackOut: make(chan chan struct{}),
+		errOut:               make(chan error),
 	}
 
-	outputPipe := make(chan interface{})
-	routine.Cntl.StartWaitGroup.Done()
+	if err := routine.Impl.Initialise(); err != nil {
+		return nil, &InitialiseError{NewGeneralError(routine.Name, err)}
+	}
 
-	stdout := routine.Cntl.Log.OutLog
-	stdout.Println(fmt.Sprintf("%s procesing pipeline started!", routine.Name))
+	routine.logStarted()
+	routine.cntl.startWaitGroup.Done()
 
 	go func() {
 	routineLoop:
 		for {
 			select {
-			case <-routine.Cntl.TerminateChan:
-				close(outputPipe)
-				err := routine.Impl.Terminate()
-				routine.checkAndLogError(err)
-
-				stdout.Println(fmt.Sprintf("%s procesing pipeline terminated!", routine.Name))
+			case terminateSuccessPipe := <-inPipes.terminateCallbackIn:
+				routine.logTerminateSignalReceived()
+				routine.terminate(outPipes, terminateSuccessPipe)
 				break routineLoop
 
-			case data := <-inputPipe:
-				err := routine.Impl.Process(data, outputPipe)
-				routine.checkAndHandleError(err, data, outputPipe)
+			case data := <-inPipes.dataIn:
+				err := routine.Impl.Process(data, outPipes.dataOut)
+				routine.checkAndHandleError(err, data, outPipes)
 			}
 		}
 	}()
 
-	return outputPipe
+	return outPipes, nil
+}
 
+func (routine *Routine) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}) {
+	close(outPipes.dataOut)
+	err := routine.Impl.Terminate()
+
+	checkAndForwardError(err, outPipes.errOut)
+	outPipes.terminateCallbackOut <- terminateSuccessPipe // Propogate termination callback downstream
+
+	close(outPipes.terminateCallbackOut)
+	close(outPipes.errOut)
+
+	routine.logTerminated()
+}
+
+func (routine *Routine) logStarted() {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("%s routine started (ID %d)!", routine.Name, routine.id))
+}
+func (routine *Routine) logTerminateSignalReceived() {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("Terminate signal received for %s Routine ID (%d)", routine.Name, routine.id))
+}
+func (routine *Routine) logTerminated() {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("%s routine terminated! (ID %d)", routine.Name, routine.id))
 }
 
 func (routine *Routine) checkAndLogError(err error) {
 	if err != nil {
-		routine.Cntl.Log.ErrLog.Println(err.Error())
+		routine.cntl.log.ErrLog.Println(err.Error())
 	}
 }
 
-func (routine *Routine) checkAndHandleError(err error, data interface{}, outPipe <-chan interface{}) {
+// For non-processing errors just send these straight to the error dump, the routine
+// won't be able to do much.
+func checkAndForwardError(err error, errPipe chan<- error) {
 	if err != nil {
-		routine.Impl.HandleDataProcessError(err, data, outPipe)
+		errPipe <- err
 	}
+}
+
+// The routine might be able to handle the error in it's implementation
+func (routine *Routine) checkAndHandleError(err error, data interface{}, outPipes *outputPipes) {
+	if err != nil {
+		routine.Impl.HandleDataProcessError(err, data, outPipes.dataOut)
+	}
+}
+
+func (routine *Routine) validateRoutineOutputPipes(outPipes *outputPipes) error {
+	if outPipes == nil {
+		return &InitialiseError{NewGeneralError(routine.Name, fmt.Errorf("Wiring error: Routine %s didn't return pipes at all", routine.Name))}
+	}
+	if outPipes.dataOut == nil {
+		return &InitialiseError{NewGeneralError(routine.Name, fmt.Errorf("Wiring error: Routine %s didn't return output pipe", routine.Name))}
+	}
+	return nil
 }

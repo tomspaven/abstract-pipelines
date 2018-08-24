@@ -3,7 +3,7 @@ package abstractpipeline_test
 import (
 	"abstract-pipelines/pkg/abstractpipeline"
 	"bytes"
-	"fmt"
+	"errors"
 	"log"
 	"math/rand"
 	"sync"
@@ -12,69 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 )
-
-type StringPrinter struct{}
-
-func (mockpipe *StringPrinter) Initialise() error { return nil }
-func (mockpipe *StringPrinter) Terminate() error  { return nil }
-func (mockpipe *StringPrinter) HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{}) {
-	return
-}
-func (mockpipe *StringPrinter) Process(data interface{}, outputPipe chan<- interface{}) error {
-	stringData, ok := data.(string)
-	if ok {
-		//fmt.Println(fmt.Sprintf("\t%s processed data %s", reflect.TypeOf(mockpipe).Name(), stringData))
-		outputPipe <- stringData
-		return nil
-	}
-
-	err := abstractpipeline.NewTypeAssertionError("string")
-	err.GenErr.RoutineName = "StringPrinter"
-
-	return err
-}
-
-type StringAppender struct{}
-
-func (mockpipe *StringAppender) Initialise() error { return nil }
-func (mockpipe *StringAppender) Terminate() error  { return nil }
-func (mockpipe *StringAppender) HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{}) {
-	return
-}
-func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- interface{}) error {
-
-	stringData, ok := data.(string)
-	if ok {
-		//fmt.Println(fmt.Sprintf("\t\t%s PIPELINED data %s", reflect.TypeOf(mockpipe).Name(), stringData))
-		stringData = stringData + " PIPELINED!"
-		outputPipe <- stringData
-		return nil
-	}
-
-	err := abstractpipeline.NewTypeAssertionError("string")
-	err.GenErr.RoutineName = "StringAppender"
-
-	return err
-}
-
-type InitErrorer struct{}
-
-func (mockpipe *InitErrorer) Initialise() error {
-
-	err := abstractpipeline.NewTerminateError()
-	err.RoutineName = "InitErrorer"
-	err.PreviousError = fmt.Errorf("I threwz an error on initialisation din't i?!")
-
-	return err
-
-}
-func (mockpipe *InitErrorer) Terminate() error { return nil }
-func (mockpipe *InitErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
-	return nil
-}
-func (mockpipe *InitErrorer) HandleDataProcessError(err error, data interface{}, outputDataPipe <-chan interface{}) {
-	return
-}
 
 const (
 	PRINT_ROUTINE  int = 0
@@ -88,36 +25,70 @@ var routineNameDictionary = map[int]string{
 	INIT_ERR_ROUTINE: "InitError",
 }
 
-type MockLog struct {
-	Out *bytes.Buffer
-	Err *bytes.Buffer
+var mockLog *MockLog
+
+func TestNew(t *testing.T) {
+	var err error
+
+	creator := func() {
+		_, _, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
+	}
+	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.Nilf(t, err, "Error returned when making pipeline")
+	checkEmptyErrorLogAndAssert(t)
 }
 
-var mockLog *MockLog
+func TestTerminate(t *testing.T) {
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+
+	creator := func() {
+		_, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
+	}
+	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.Nilf(t, err, "Error returned when making pipeline")
+
+	closer := func() {
+		<-pipeline.Stop()
+	}
+
+	assert.NotPanicsf(t, closer, "Paniced when terminating pipeline")
+	checkEmptyErrorLogAndAssert(t)
+}
 
 // Basic test
 // Create a two step pipeline:
 // Step 1: Prints input string
 // Step 2: Appends "PIPELINED!" to the string
 // Send a small set of strings to it without termination
-func TestNewAndStopWhenDone(t *testing.T) {
-	inputChan, pipeline, err := makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
+func TestInputStingsStopWhenDone(t *testing.T) {
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var pipelineIn chan<- interface{}
 
+	creator := func() {
+		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
+	}
+
+	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
+
 	go func() {
 		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
-			inputChan <- datastring
+			pipelineIn <- datastring
 		}
-		pipeline.Stop()
+		<-pipeline.Stop()
 	}()
 
 	wg := &sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(2)
 
 	drinkFromStringPipeAndAssert(pipeline, t, wg)
+	drinkFromErrorPipeAndAssert(pipeline, t, wg)
 	wg.Wait()
 
-	checkEmptyErrorLogAndAssert(t) //INVESTIGATE RANDOM FAILURE.....
+	checkEmptyErrorLogAndAssert(t)
+
 }
 
 const terminateTestLengthMilliseconds time.Duration = 50
@@ -125,7 +96,7 @@ const terminateTestLengthMilliseconds time.Duration = 50
 // Setup same basic pipeline but hammer it with an infinite barrage of random strings.
 // Terminate the pipeline after 50 milliseconds in the same order it was constructed
 // (i.e. printer THEN appender)
-func TestNewAndStopAbruptly(t *testing.T) {
+/*func TestNewAndStopAbruptly(t *testing.T) {
 
 	inputChan, pipeline, err := makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
 	assert.Nilf(t, err, "Unexpected Error returned when making pipeline")
@@ -137,30 +108,38 @@ func TestNewAndStopAbruptly(t *testing.T) {
 	}()
 
 	wg := &sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(2)
 
 	drinkFromStringPipeAndAssert(pipeline, t, wg)
+	drinkFromErrorPipeAndAssert(pipeline, t, wg)
+
+	wg.Wait()
 
 	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
 	<-terminatePipelineTicker.C
 
-	pipeline.Stop()
-	wg.Wait()
+	var stopSuccess struct{}
+	stopFunc := func() {
+		stopSuccess = <-pipeline.Stop()
+	}
+
+	assert.NotPanicsf(t, stopFunc, "Paniced when stopping pipeline")
+	assert.NotNilf(t, stopSuccess, "Nil returned from pipeline StopFunc channel")
 
 	checkEmptyErrorLogAndAssert(t)
 }
 
-func TestNewWithInitError(t *testing.T) {
+/*func TestNewWithInitError(t *testing.T) {
 	_, pipeline, err := makePipeline(PRINT_ROUTINE, INIT_ERR_ROUTINE)
 	assert.NotNilf(t, err, "Unexpected Error returned when making pipeline")
 	assert.Nilf(t, pipeline, "Unpexetced pipeline returned, should be nil")
 	checkExpectedErrorLogContentAndAssert(t, "I threwz an error")
-}
+}*/
 
 func makePipeline(routineIDs ...int) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
 	routines := generatePipelineRoutines(routineIDs...)
 	inputChan := make(chan interface{})
-	pipeline, err := abstractpipeline.New(inputChan, routines...)
+	pipeline, err := abstractpipeline.New(inputChan, createLoggers(), routines...)
 	return inputChan, pipeline, err
 }
 
@@ -178,8 +157,9 @@ func checkExpectedErrorLogContentAndAssert(t *testing.T, expectedlogContent stri
 func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wg *sync.WaitGroup) {
 
 	go func() {
-		for raw := range pipeline.OutputPipe {
+		for raw := range pipeline.SinkOutPipe {
 			obtainedString, ok := raw.(string)
+			//fmt.Println(fmt.Sprintf("\t\t\tand so, %s came out the other end", obtainedString))
 			assert.Equalf(t, true, ok, "type assertion failure on string pipe expected string")
 
 			checkString := "PIPELINED!"
@@ -187,16 +167,29 @@ func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testin
 		}
 		wg.Done()
 	}()
+
+}
+
+func drinkFromErrorPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wg *sync.WaitGroup) {
+	go func() {
+		for raw := range pipeline.ErrorOutPipe {
+			err, ok := raw.(error)
+			assert.Equalf(t, true, ok, "Read SOMETHING unexpected from the error pipe but wasn't an error, type assert problem")
+			if err == nil {
+				err = errors.New("NIL ERROR???")
+			}
+			assert.Equalf(t, true, true, "Got unexpected error %s from pipe", err.Error())
+		}
+		wg.Done()
+	}()
 }
 
 func generatePipelineRoutines(testRoutineIDs ...int) []*abstractpipeline.Routine {
-	pipelineControllers := setupRoutineControllers(len(testRoutineIDs))
 	routines := make([]*abstractpipeline.Routine, len(testRoutineIDs))
 
 	for i, id := range testRoutineIDs {
 		routine := createRoutineFactoryMethod(id)
 		routine.Name = routineNameDictionary[id]
-		routine.Cntl = *pipelineControllers[i]
 		routines[i] = routine
 	}
 
@@ -218,11 +211,7 @@ func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
 	return routine
 }
 
-func setupRoutineControllers(numberOfRoutines int) []*abstractpipeline.RoutineController {
-
-	waitGroup := &sync.WaitGroup{}
-	waitGroup.Add(numberOfRoutines)
-
+func createLoggers() abstractpipeline.Loggers {
 	mockLog = &MockLog{
 		Out: &bytes.Buffer{},
 		Err: &bytes.Buffer{},
@@ -233,16 +222,7 @@ func setupRoutineControllers(numberOfRoutines int) []*abstractpipeline.RoutineCo
 		OutLog: log.New(mockLog.Out, "Info:", logFlags),
 		ErrLog: log.New(mockLog.Err, "Error:", logFlags),
 	}
-
-	controllers := make([]*abstractpipeline.RoutineController, numberOfRoutines)
-	for i := 0; i < len(controllers); i++ {
-		controllers[i] = &abstractpipeline.RoutineController{
-			StartWaitGroup: waitGroup,
-			TerminateChan:  make(chan struct{}),
-			Log:            loggers,
-		}
-	}
-	return controllers
+	return loggers
 }
 
 func generateInfiniteRandomStrings() <-chan string {
