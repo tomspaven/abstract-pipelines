@@ -4,26 +4,16 @@ import (
 	"abstract-pipelines/pkg/abstractpipeline"
 	"bytes"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-const (
-	PRINT_ROUTINE  int = 0
-	APPEND_ROUTINE     = iota
-	INIT_ERR_ROUTINE
-)
-
-var routineNameDictionary = map[int]string{
-	PRINT_ROUTINE:    "Print",
-	APPEND_ROUTINE:   "Append",
-	INIT_ERR_ROUTINE: "InitError",
-}
 
 var mockLog *MockLog
 
@@ -67,7 +57,7 @@ func TestInputStingsStopWhenDone(t *testing.T) {
 	var pipelineIn chan<- interface{}
 
 	creator := func() {
-		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
+		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE)
 	}
 
 	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
@@ -96,14 +86,22 @@ const terminateTestLengthMilliseconds time.Duration = 50
 // Setup same basic pipeline but hammer it with an infinite barrage of random strings.
 // Terminate the pipeline after 50 milliseconds in the same order it was constructed
 // (i.e. printer THEN appender)
-/*func TestNewAndStopAbruptly(t *testing.T) {
+func TestNewAndStopAbruptly(t *testing.T) {
 
-	inputChan, pipeline, err := makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
-	assert.Nilf(t, err, "Unexpected Error returned when making pipeline")
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var pipelineIn chan<- interface{}
+
+	creator := func() {
+		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE)
+	}
+
+	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.Nilf(t, err, "Error returned when making pipeline")
 
 	go func() {
 		for datastring := range generateInfiniteRandomStrings() {
-			inputChan <- datastring
+			pipelineIn <- datastring
 		}
 	}()
 
@@ -112,8 +110,6 @@ const terminateTestLengthMilliseconds time.Duration = 50
 
 	drinkFromStringPipeAndAssert(pipeline, t, wg)
 	drinkFromErrorPipeAndAssert(pipeline, t, wg)
-
-	wg.Wait()
 
 	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
 	<-terminatePipelineTicker.C
@@ -127,6 +123,7 @@ const terminateTestLengthMilliseconds time.Duration = 50
 	assert.NotNilf(t, stopSuccess, "Nil returned from pipeline StopFunc channel")
 
 	checkEmptyErrorLogAndAssert(t)
+	wg.Wait()
 }
 
 /*func TestNewWithInitError(t *testing.T) {
@@ -159,8 +156,8 @@ func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testin
 	go func() {
 		for raw := range pipeline.SinkOutPipe {
 			obtainedString, ok := raw.(string)
-			//fmt.Println(fmt.Sprintf("\t\t\tand so, %s came out the other end", obtainedString))
-			assert.Equalf(t, true, ok, "type assertion failure on string pipe expected string")
+			fmt.Println(fmt.Sprintf("\t\t\tand so, %s came out the other end", obtainedString))
+			assert.Equalf(t, true, ok, "type assertion failure on string pipe expected string, got %T", obtainedString)
 
 			checkString := "PIPELINED!"
 			assert.Containsf(t, obtainedString, checkString, "Pipeline processed string %s didn't contain string %s", obtainedString, checkString)
@@ -196,21 +193,6 @@ func generatePipelineRoutines(testRoutineIDs ...int) []*abstractpipeline.Routine
 	return routines
 }
 
-func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
-	routine := &abstractpipeline.Routine{}
-	switch id {
-	case PRINT_ROUTINE:
-		routine.Impl = &StringPrinter{}
-	case APPEND_ROUTINE:
-		routine.Impl = &StringAppender{}
-	case INIT_ERR_ROUTINE:
-		routine.Impl = &InitErrorer{}
-	default:
-		routine.Impl = &InitErrorer{}
-	}
-	return routine
-}
-
 func createLoggers() abstractpipeline.Loggers {
 	mockLog = &MockLog{
 		Out: &bytes.Buffer{},
@@ -219,8 +201,10 @@ func createLoggers() abstractpipeline.Loggers {
 
 	logFlags := log.Ldate | log.Ltime | log.Lshortfile
 	loggers := abstractpipeline.Loggers{
-		OutLog: log.New(mockLog.Out, "Info:", logFlags),
-		ErrLog: log.New(mockLog.Err, "Error:", logFlags),
+		//OutLog: log.New(mockLog.Out, "Info:", logFlags),
+		//ErrLog: log.New(mockLog.Err, "Error:", logFlags),
+		OutLog: log.New(os.Stdout, "Info:", logFlags),
+		ErrLog: log.New(os.Stderr, "Error:", logFlags),
 	}
 	return loggers
 }

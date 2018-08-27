@@ -4,6 +4,7 @@ import (
 	"abstract-pipelines/pkg/abstractpipeline"
 	"bytes"
 	"fmt"
+	"reflect"
 )
 
 type MockLog struct {
@@ -11,17 +12,48 @@ type MockLog struct {
 	Err *bytes.Buffer
 }
 
+const (
+	PRINT_ROUTINE  int = 0
+	APPEND_ROUTINE     = iota
+	INIT_ERR_ROUTINE
+	COUNTER_ROUTINE
+)
+
+var routineNameDictionary = map[int]string{
+	PRINT_ROUTINE:    "Print",
+	APPEND_ROUTINE:   "Append",
+	INIT_ERR_ROUTINE: "InitError",
+	COUNTER_ROUTINE:  "Counter",
+}
+
+func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
+	routine := &abstractpipeline.Routine{}
+	switch id {
+	case PRINT_ROUTINE:
+		routine.Impl = &StringPrinter{}
+	case APPEND_ROUTINE:
+		routine.Impl = &StringAppender{}
+	case INIT_ERR_ROUTINE:
+		routine.Impl = &InitErrorer{}
+	case COUNTER_ROUTINE:
+		routine.Impl = &RecordCounter{}
+	default:
+		routine.Impl = &InitErrorer{}
+	}
+	return routine
+}
+
 type StringPrinter struct{}
 
-func (mockpipe *StringPrinter) Initialise() error { return nil }
-func (mockpipe *StringPrinter) Terminate() error  { return nil }
-func (mockpipe *StringPrinter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
+func (printer *StringPrinter) Initialise() error { return nil }
+func (printer *StringPrinter) Terminate() error  { return nil }
+func (printer *StringPrinter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
 	return
 }
-func (mockpipe *StringPrinter) Process(data interface{}, outputPipe chan<- interface{}) error {
+func (printer *StringPrinter) Process(data interface{}, outputPipe chan<- interface{}) error {
 	stringData, ok := data.(string)
 	if ok {
-		//fmt.Println(fmt.Sprintf("\t%s processed data %s", reflect.TypeOf(mockpipe).Name(), stringData))
+		fmt.Println(fmt.Sprintf("\t%s processed data %s", reflect.TypeOf(printer).Name(), stringData))
 		outputPipe <- stringData
 		return nil
 	}
@@ -34,15 +66,15 @@ func (mockpipe *StringPrinter) Process(data interface{}, outputPipe chan<- inter
 
 type StringAppender struct{}
 
-func (mockpipe *StringAppender) Initialise() error { return nil }
-func (mockpipe *StringAppender) Terminate() error  { return nil }
-func (mockpipe *StringAppender) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
+func (appender *StringAppender) Initialise() error { return nil }
+func (appender *StringAppender) Terminate() error  { return nil }
+func (appender *StringAppender) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
 	return
 }
-func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- interface{}) error {
+func (appender *StringAppender) Process(data interface{}, outputPipe chan<- interface{}) error {
 	stringData, ok := data.(string)
 	if ok {
-		//fmt.Println(fmt.Sprintf("\t\t%s PIPELINED data %s", reflect.TypeOf(mockpipe).Name(), stringData))
+		fmt.Println(fmt.Sprintf("\t\t%s PIPELINED data %s", reflect.TypeOf(appender).Name(), stringData))
 		stringData = stringData + " PIPELINED!"
 		outputPipe <- stringData
 		return nil
@@ -56,14 +88,32 @@ func (mockpipe *StringAppender) Process(data interface{}, outputPipe chan<- inte
 
 type InitErrorer struct{}
 
-func (mockpipe *InitErrorer) Initialise() error {
+func (errorer *InitErrorer) Initialise() error {
 	generalError := abstractpipeline.NewGeneralError("InitErrorer", fmt.Errorf("I threwz an error on initialisation din't i?!"))
 	return &abstractpipeline.InitialiseError{generalError}
 }
-func (mockpipe *InitErrorer) Terminate() error { return nil }
-func (mockpipe *InitErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
+func (errorer *InitErrorer) Terminate() error { return nil }
+func (errorer *InitErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
 	return nil
 }
-func (mockpipe *InitErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
+func (errorer *InitErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
 	return
+}
+
+type RecordCounter struct {
+	recordsProcessed int64
+}
+
+func (counter *RecordCounter) Initialise() error { return nil }
+func (counter *RecordCounter) Terminate() error {
+	fmt.Println(fmt.Sprintf("******************RECORDS PROCESSED: %d**********************", counter.recordsProcessed))
+	return nil
+}
+func (counter *RecordCounter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) {
+	return
+}
+func (counter *RecordCounter) Process(data interface{}, outputPipe chan<- interface{}) error {
+	counter.recordsProcessed++
+	outputPipe <- data
+	return nil
 }

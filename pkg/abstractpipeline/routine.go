@@ -70,12 +70,11 @@ func (routine *Routine) startAndGetOutputPipes(inPipes *inputPipes) (*outputPipe
 }
 
 func (routine *Routine) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}) {
-	close(outPipes.dataOut)
 	err := routine.Impl.Terminate()
-
 	checkAndForwardError(err, outPipes.errOut)
 	outPipes.terminateCallbackOut <- terminateSuccessPipe // Propogate termination callback downstream
 
+	close(outPipes.dataOut)
 	close(outPipes.terminateCallbackOut)
 	close(outPipes.errOut)
 

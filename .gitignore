@@ -2,3 +2,4 @@ pipeline-demo
 debug.test
 vendor/
 Gopkg.toml
+.vscode
