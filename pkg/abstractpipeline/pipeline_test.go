@@ -145,6 +145,20 @@ func TestNewWithInitError(t *testing.T) {
 	assert.Containsf(t, previousErrText, "I threwz an error on initialisation din't i?", "Expected previous error to contain \"I threwz an error on initialisation din't i?\".  Previous Error text was %s", previousErrText)
 }
 
+func TestRoutineWithNoImpl(t *testing.T) {
+
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var rawErr error
+	creator := func() {
+		_, pipeline, rawErr = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, NO_IMPL_ROUTINE, COUNTER_ROUTINE)
+	}
+	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotNilf(t, rawErr, "Unexpected Error not returned when making pipeline with a routine with a faulty initialise")
+	assert.Nilf(t, pipeline, "Unexpected pipeline returned, should be nil")
+	assert.IsTypef(t, &abstractpipeline.InitialiseError{}, rawErr, "Unexpected error type returned by faulty initialiser routine, expecting %s, got %T", "InitialiseError", err)
+}
+
 func makePipeline(routineIDs ...int) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
 	routines := generatePipelineRoutines(routineIDs...)
 	inputChan := make(chan interface{})
