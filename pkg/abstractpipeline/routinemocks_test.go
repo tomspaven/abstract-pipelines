@@ -17,6 +17,7 @@ const (
 	APPEND_ROUTINE     = iota
 	INIT_ERR_ROUTINE
 	COUNTER_ROUTINE
+	NO_IMPL_ROUTINE
 )
 
 var routineNameDictionary = map[int]string{
@@ -24,6 +25,7 @@ var routineNameDictionary = map[int]string{
 	APPEND_ROUTINE:   "Append",
 	INIT_ERR_ROUTINE: "InitError",
 	COUNTER_ROUTINE:  "Counter",
+	NO_IMPL_ROUTINE:  "NoImpl",
 }
 
 func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
@@ -37,6 +39,8 @@ func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
 		routine.Impl = &InitErrorer{}
 	case COUNTER_ROUTINE:
 		routine.Impl = &RecordCounter{}
+	case NO_IMPL_ROUTINE:
+		routine.Impl = nil
 	default:
 		routine.Impl = &InitErrorer{}
 	}

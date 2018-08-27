@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -126,12 +125,25 @@ func TestNewAndStopAbruptly(t *testing.T) {
 	wg.Wait()
 }
 
-/*func TestNewWithInitError(t *testing.T) {
-	_, pipeline, err := makePipeline(PRINT_ROUTINE, INIT_ERR_ROUTINE)
-	assert.NotNilf(t, err, "Unexpected Error returned when making pipeline")
-	assert.Nilf(t, pipeline, "Unpexetced pipeline returned, should be nil")
-	checkExpectedErrorLogContentAndAssert(t, "I threwz an error")
-}*/
+func TestNewWithInitError(t *testing.T) {
+
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var rawErr error
+	creator := func() {
+		_, pipeline, rawErr = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE, INIT_ERR_ROUTINE)
+	}
+
+	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotNilf(t, rawErr, "Unexpected Error not returned when making pipeline with a routine with a faulty initialise")
+	assert.Nilf(t, pipeline, "Unexpected pipeline returned, should be nil")
+	assert.IsTypef(t, &abstractpipeline.InitialiseError{}, rawErr, "Unexpected error type returned by faulty initialiser routine, expecting %s, got %T", "InitialiseError", err)
+	initialiseErr, ok := rawErr.(*abstractpipeline.InitialiseError)
+	assert.Equalf(t, ok, true, "Type assertion error on error returned from pipeline")
+	assert.NotNilf(t, initialiseErr.GenErr.PreviousError, "Previous err was nil - not expected")
+	previousErrText := initialiseErr.GenErr.PreviousError.Error()
+	assert.Containsf(t, previousErrText, "I threwz an error on initialisation din't i?", "Expected previous error to contain \"I threwz an error on initialisation din't i?\".  Previous Error text was %s", previousErrText)
+}
 
 func makePipeline(routineIDs ...int) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
 	routines := generatePipelineRoutines(routineIDs...)
@@ -201,10 +213,10 @@ func createLoggers() abstractpipeline.Loggers {
 
 	logFlags := log.Ldate | log.Ltime | log.Lshortfile
 	loggers := abstractpipeline.Loggers{
-		//OutLog: log.New(mockLog.Out, "Info:", logFlags),
-		//ErrLog: log.New(mockLog.Err, "Error:", logFlags),
-		OutLog: log.New(os.Stdout, "Info:", logFlags),
-		ErrLog: log.New(os.Stderr, "Error:", logFlags),
+		OutLog: log.New(mockLog.Out, "Info:", logFlags),
+		ErrLog: log.New(mockLog.Err, "Error:", logFlags),
+		//OutLog: log.New(os.Stdout, "Info:", logFlags),
+		//ErrLog: log.New(os.Stderr, "Error:", logFlags),
 	}
 	return loggers
 }
