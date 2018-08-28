@@ -18,15 +18,17 @@ const (
 	COUNTER_ROUTINE
 	NO_IMPL_ROUTINE
 	TEFLON_PROCESS_ERR_ROUTINE
+	HANDLED_PROCESS_ERR_ROUTINE
 )
 
 var routineNameDictionary = map[int]string{
-	PRINT_ROUTINE:              "Print",
-	APPEND_ROUTINE:             "Append",
-	INIT_ERR_ROUTINE:           "InitError",
-	COUNTER_ROUTINE:            "Counter",
-	NO_IMPL_ROUTINE:            "NoImpl",
-	TEFLON_PROCESS_ERR_ROUTINE: "Teflon",
+	PRINT_ROUTINE:               "Print",
+	APPEND_ROUTINE:              "Append",
+	INIT_ERR_ROUTINE:            "InitError",
+	COUNTER_ROUTINE:             "Counter",
+	NO_IMPL_ROUTINE:             "NoImpl",
+	TEFLON_PROCESS_ERR_ROUTINE:  "Teflon",
+	HANDLED_PROCESS_ERR_ROUTINE: "Handled",
 }
 
 func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
@@ -44,6 +46,8 @@ func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
 		routine.Impl = nil
 	case TEFLON_PROCESS_ERR_ROUTINE:
 		routine.Impl = &TeflonProcessErrorer{}
+	case HANDLED_PROCESS_ERR_ROUTINE:
+		routine.Impl = &HandledProcessErrorer{}
 	default:
 		routine.Impl = &InitErrorer{}
 	}
@@ -54,8 +58,8 @@ type StringPrinter struct{}
 
 func (printer *StringPrinter) Initialise() error { return nil }
 func (printer *StringPrinter) Terminate() error  { return nil }
-func (printer *StringPrinter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) bool {
-	return false
+func (printer *StringPrinter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) error {
+	return err
 }
 func (printer *StringPrinter) Process(data interface{}, outputPipe chan<- interface{}) error {
 	stringData, ok := data.(string)
@@ -75,8 +79,8 @@ type StringAppender struct{}
 
 func (appender *StringAppender) Initialise() error { return nil }
 func (appender *StringAppender) Terminate() error  { return nil }
-func (appender *StringAppender) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) bool {
-	return false
+func (appender *StringAppender) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) error {
+	return err
 }
 func (appender *StringAppender) Process(data interface{}, outputPipe chan<- interface{}) error {
 	stringData, ok := data.(string)
@@ -102,8 +106,8 @@ func (counter *RecordCounter) Terminate() error {
 	fmt.Println(fmt.Sprintf("******************RECORDS PROCESSED: %d**********************", counter.recordsProcessed))
 	return nil
 }
-func (counter *RecordCounter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) bool {
-	return false
+func (counter *RecordCounter) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) error {
+	return err
 }
 func (counter *RecordCounter) Process(data interface{}, outputPipe chan<- interface{}) error {
 	counter.recordsProcessed++
@@ -121,8 +125,8 @@ func (errorer *InitErrorer) Terminate() error { return nil }
 func (errorer *InitErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
 	return nil
 }
-func (errorer *InitErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) bool {
-	return false
+func (errorer *InitErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) error {
+	return err
 }
 
 type TeflonProcessErrorer struct{}
@@ -132,6 +136,22 @@ func (errorer *TeflonProcessErrorer) Terminate() error  { return nil }
 func (errorer *TeflonProcessErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
 	return abstractpipeline.NewGeneralError("TeflonErrorer", fmt.Errorf("Nuffin to do wi' me mate...I just create errors..."))
 }
-func (errorer *TeflonProcessErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) bool {
-	return false
+func (errorer *TeflonProcessErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) error {
+	return err
+}
+
+type HandledProcessErrorer struct{}
+
+func (errorer *HandledProcessErrorer) Initialise() error { return nil }
+func (errorer *HandledProcessErrorer) Terminate() error  { return nil }
+func (errorer *HandledProcessErrorer) Process(data interface{}, outputPipe chan<- interface{}) error {
+	return abstractpipeline.NewGeneralError("HandledProcessErrorer", fmt.Errorf("I create an error when processing, but I know how to bloody well deal with it - pass it down the pipeline and don't bother the client!"))
+}
+func (errorer *HandledProcessErrorer) HandleDataProcessError(err error, data interface{}, outDataPipe chan<- interface{}) error {
+	stringData, ok := data.(string)
+	if !ok {
+		return abstractpipeline.NewTypeAssertionError(abstractpipeline.NewGeneralError("HandledProcessErrorer", err), "string")
+	}
+	outDataPipe <- stringData + " HANDLED"
+	return nil
 }

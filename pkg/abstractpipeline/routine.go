@@ -16,7 +16,7 @@ type Processor interface {
 	Initialise() error
 	Terminate() error
 	Process(data interface{}, outputDataPipe chan<- interface{}) error
-	HandleDataProcessError(err error, data interface{}, outputDataPipe chan<- interface{}) bool
+	HandleDataProcessError(err error, data interface{}, outputDataPipe chan<- interface{}) error
 }
 
 type routineController struct {
@@ -127,8 +127,8 @@ func checkAndForwardError(err error, errPipe chan<- error) {
 // general error output pipe.
 func (routine *Routine) checkAndHandleError(err error, data interface{}, outPipes *outputPipes) {
 	if err != nil {
-		if handled := routine.Impl.HandleDataProcessError(err, data, outPipes.dataOut); !handled {
-			outPipes.errOut <- err
+		if unhandledError := routine.Impl.HandleDataProcessError(err, data, outPipes.dataOut); unhandledError != nil {
+			outPipes.errOut <- unhandledError
 		}
 	}
 }

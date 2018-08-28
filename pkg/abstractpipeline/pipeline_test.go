@@ -19,10 +19,7 @@ var mockLog *MockLog
 func TestNew(t *testing.T) {
 	var err error
 
-	creator := func() {
-		_, _, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
-	}
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotPanicsf(t, func() { _, _, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE) }, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 	checkEmptyErrorLogAndAssert(t)
 }
@@ -30,19 +27,23 @@ func TestNew(t *testing.T) {
 func TestTerminate(t *testing.T) {
 	var err error
 	var pipeline *abstractpipeline.Pipeline
+	var stopSuccess struct{}
 
-	creator := func() {
-		_, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE)
-	}
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotPanicsf(t, func() { _, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE) }, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
-
-	closer := func() {
-		<-pipeline.Stop()
-	}
-
-	assert.NotPanicsf(t, closer, "Paniced when terminating pipeline")
+	assert.NotPanicsf(t, func() { <-pipeline.Stop() }, "Paniced when terminating pipeline")
 	checkEmptyErrorLogAndAssert(t)
+	assertTerminatedPipeline(t, stopSuccess, pipeline)
+}
+
+func assertTerminatedPipeline(t *testing.T, stopSuccess struct{}, pipeline *abstractpipeline.Pipeline) {
+	if pipeline != nil {
+		assert.NotNilf(t, stopSuccess, "Nil returned from pipeline StopFunc channel")
+		assert.Equalf(t, <-pipeline.ErrorOutPipe, nil, "Expected nil data to be immediately returned when getting from a terminated pipeline's error pipe but it wasn't")
+		assert.Equalf(t, <-pipeline.SinkOutPipe, nil, "Expected nil data to be immediately returned when getting from a terminated pipeline's error pipe but it wasn't")
+		assert.Panicsf(t, func() { pipeline.ErrorOutPipe <- fmt.Errorf("Blah") }, "Expected to panic when sending error data to a terminated pipeline but it didn't")
+		assert.Panicsf(t, func() { pipeline.SinkOutPipe <- "Blah" }, "Expected to panic when sending error data to a terminated pipeline but it didn't")
+	}
 }
 
 // Basic test
@@ -54,19 +55,16 @@ func TestInputStingsStopWhenDone(t *testing.T) {
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
+	var stopSuccess struct{}
 
-	creator := func() {
-		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE)
-	}
-
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotPanicsf(t, func() { pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE) }, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 
 	go func() {
 		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
 			pipelineIn <- datastring
 		}
-		<-pipeline.Stop()
+		stopSuccess = <-pipeline.Stop()
 	}()
 
 	wgs := waitGroups{
@@ -76,10 +74,12 @@ func TestInputStingsStopWhenDone(t *testing.T) {
 
 	wgs.start.Add(2)
 	wgs.end.Add(2)
-	drinkFromStringPipeAndAssert(pipeline, t, wgs)
+	drinkFromStringPipeAndAssert(pipeline, t, wgs, "PIPELINED")
 	drinkFromErrorPipeAndAssertUnexpected(pipeline, t, wgs)
 	wgs.start.Wait()
+
 	checkEmptyErrorLogAndAssert(t)
+	assertTerminatedPipeline(t, stopSuccess, pipeline)
 	wgs.end.Wait()
 }
 
@@ -92,12 +92,9 @@ func TestNewAndStopAbruptly(t *testing.T) {
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
+	var stopSuccess struct{}
 
-	creator := func() {
-		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE)
-	}
-
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotPanicsf(t, func() { pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE) }, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 
 	go func() {
@@ -113,48 +110,45 @@ func TestNewAndStopAbruptly(t *testing.T) {
 
 	wgs.start.Add(2)
 	wgs.end.Add(2)
-	drinkFromStringPipeAndAssert(pipeline, t, wgs)
+	drinkFromStringPipeAndAssert(pipeline, t, wgs, "PIPELINED")
 	drinkFromErrorPipeAndAssertUnexpected(pipeline, t, wgs)
 	wgs.start.Wait()
 
 	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
 	<-terminatePipelineTicker.C
 
-	var stopSuccess struct{}
-	stopFunc := func() {
-		stopSuccess = <-pipeline.Stop()
-	}
-
-	assert.NotPanicsf(t, stopFunc, "Paniced when stopping pipeline")
-	assert.NotNilf(t, stopSuccess, "Nil returned from pipeline StopFunc channel")
+	assert.NotPanicsf(t, func() { stopSuccess = <-pipeline.Stop() }, "Paniced when stopping pipeline")
 
 	checkEmptyErrorLogAndAssert(t)
+	assertTerminatedPipeline(t, stopSuccess, pipeline)
 	wgs.end.Wait()
 }
 
 func TestNewWithInitError(t *testing.T) {
 	var pipeline *abstractpipeline.Pipeline
 	var rawErr error
-	creator := func() {
+
+	assert.NotPanicsf(t, func() {
 		_, pipeline, rawErr = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, COUNTER_ROUTINE, INIT_ERR_ROUTINE)
-	}
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	}, "Paniced when creating pipeline")
 	initialiseErr := assertOnInitialiseError(t, rawErr, pipeline)
 	previousErrText := initialiseErr.GenErr.PreviousError.Error()
 	assert.Containsf(t, previousErrText, "I threwz an error on initialisation din't i?", "Expected previous error to contain \"I threwz an error on initialisation din't i?\".  Previous Error text was %s", previousErrText)
+	assertTerminatedPipeline(t, struct{}{}, pipeline)
 	checkEmptyErrorLogAndAssert(t)
 }
 
 func TestRoutineWithNoImpl(t *testing.T) {
 	var pipeline *abstractpipeline.Pipeline
-	var rawErr error
-	creator := func() {
-		_, pipeline, rawErr = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, NO_IMPL_ROUTINE, COUNTER_ROUTINE)
-	}
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
-	initialiseErr := assertOnInitialiseError(t, rawErr, pipeline)
+	var err error
+
+	assert.NotPanicsf(t, func() {
+		_, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, NO_IMPL_ROUTINE, COUNTER_ROUTINE)
+	}, "Paniced when creating pipeline")
+	initialiseErr := assertOnInitialiseError(t, err, pipeline)
 	previousErrText := initialiseErr.GenErr.PreviousError.Error()
 	assert.Containsf(t, previousErrText, "failed to initialise as it had no Impl assigned", "Expected previous error to contain \"failed to initialise as it had no Impl assigned\".  Previous Error text was %s", previousErrText)
+	assertTerminatedPipeline(t, struct{}{}, pipeline)
 	checkEmptyErrorLogAndAssert(t)
 }
 
@@ -162,12 +156,10 @@ func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
-	var rawErr error
-	creator := func() {
-		pipelineIn, pipeline, rawErr = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, TEFLON_PROCESS_ERR_ROUTINE, COUNTER_ROUTINE)
-	}
 
-	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
+	assert.NotPanicsf(t, func() {
+		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, TEFLON_PROCESS_ERR_ROUTINE, COUNTER_ROUTINE)
+	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 	assert.NotNilf(t, pipeline, "Unexpected nil pipeline returned")
 
@@ -210,7 +202,44 @@ func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 
 	fmt.Println(fmt.Sprintf("Send %d records and got %d errors", recordsSent, errorsReceived))
 	assert.Equalf(t, recordsSent, errorsReceived, "Didn't receive the same number of errors out as messages pushed into the pipeline. Pushed %d, got %d errors", recordsSent, errorsReceived)
+}
 
+func TestWithRoutineThatHandlesErrors(t *testing.T) {
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var pipelineIn chan<- interface{}
+	var stopSuccess struct{}
+
+	assert.NotPanicsf(t, func() {
+		pipelineIn, pipeline, err = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, HANDLED_PROCESS_ERR_ROUTINE, COUNTER_ROUTINE)
+	}, "Paniced when creating pipeline")
+	assert.Nilf(t, err, "Error returned when making pipeline")
+
+	go func() {
+		for datastring := range generateInfiniteRandomStrings() {
+			pipelineIn <- datastring
+		}
+	}()
+
+	wgs := waitGroups{
+		start: &sync.WaitGroup{},
+		end:   &sync.WaitGroup{},
+	}
+
+	wgs.start.Add(2)
+	wgs.end.Add(2)
+	drinkFromStringPipeAndAssert(pipeline, t, wgs, "PIPELINED!", "HANDLED")
+	drinkFromErrorPipeAndAssertUnexpected(pipeline, t, wgs)
+	wgs.start.Wait()
+
+	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
+	<-terminatePipelineTicker.C
+
+	assert.NotPanicsf(t, func() { stopSuccess = <-pipeline.Stop() }, "Paniced when stopping pipeline")
+
+	checkEmptyErrorLogAndAssert(t)
+	assertTerminatedPipeline(t, stopSuccess, pipeline)
+	wgs.end.Wait()
 }
 
 func makePipeline(routineIDs ...int) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
@@ -252,6 +281,7 @@ func drinkFromErrorPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing
 	}()
 	return numErrorsChan
 }
+
 func drinkFromErrorPipeAndAssertUnexpected(pipeline *abstractpipeline.Pipeline, t *testing.T, wgs waitGroups) {
 	wgs.start.Done()
 	go func() {
@@ -280,7 +310,7 @@ func drinkFromStringPipeAndAssertUnexpected(pipeline *abstractpipeline.Pipeline,
 
 }
 
-func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wgs waitGroups) {
+func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wgs waitGroups, checkStrings ...string) {
 	wgs.start.Done()
 	go func() {
 		for raw := range pipeline.SinkOutPipe {
@@ -288,8 +318,10 @@ func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testin
 			//fmt.Println(fmt.Sprintf("\t\t\tand so, %s came out the other end", obtainedString))
 			assert.Equalf(t, true, ok, "type assertion failure on string pipe expected string, got %T", obtainedString)
 
-			checkString := "PIPELINED!"
-			assert.Containsf(t, obtainedString, checkString, "Pipeline processed string %s didn't contain string %s", obtainedString, checkString)
+			for _, checkString := range checkStrings {
+				assert.Containsf(t, obtainedString, checkString, "Pipeline processed string %s didn't contain string %s", obtainedString, checkString)
+			}
+
 		}
 		wgs.end.Done()
 	}()
