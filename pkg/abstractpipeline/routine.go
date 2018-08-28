@@ -43,6 +43,10 @@ func (routine *Routine) startAndGetOutputPipes(inPipes *inputPipes) (*outputPipe
 		errOut:               make(chan error),
 	}
 
+	if err := routine.validate(); err != nil {
+		return nil, err
+	}
+
 	if err := routine.Impl.Initialise(); err != nil {
 		return nil, &InitialiseError{NewGeneralError(routine.Name, err)}
 	}
@@ -67,6 +71,20 @@ func (routine *Routine) startAndGetOutputPipes(inPipes *inputPipes) (*outputPipe
 	}()
 
 	return outPipes, nil
+}
+
+const unknownRoutineName string = "Unknown"
+
+func (routine *Routine) validate() error {
+	routineName := routine.Name
+	if routine.Name == "" {
+		routineName = unknownRoutineName
+	}
+
+	if routine.Impl == nil {
+		return &InitialiseError{NewGeneralError(routine.Name, fmt.Errorf("Routine %s failed to initialise as it had no Impl assigned", routineName))}
+	}
+	return nil
 }
 
 func (routine *Routine) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}) {

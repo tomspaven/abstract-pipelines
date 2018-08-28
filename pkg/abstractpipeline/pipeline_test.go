@@ -86,7 +86,6 @@ const terminateTestLengthMilliseconds time.Duration = 50
 // Terminate the pipeline after 50 milliseconds in the same order it was constructed
 // (i.e. printer THEN appender)
 func TestNewAndStopAbruptly(t *testing.T) {
-
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
@@ -126,7 +125,6 @@ func TestNewAndStopAbruptly(t *testing.T) {
 }
 
 func TestNewWithInitError(t *testing.T) {
-
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var rawErr error
@@ -146,7 +144,6 @@ func TestNewWithInitError(t *testing.T) {
 }
 
 func TestRoutineWithNoImpl(t *testing.T) {
-
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var rawErr error
@@ -154,9 +151,14 @@ func TestRoutineWithNoImpl(t *testing.T) {
 		_, pipeline, rawErr = makePipeline(PRINT_ROUTINE, APPEND_ROUTINE, NO_IMPL_ROUTINE, COUNTER_ROUTINE)
 	}
 	assert.NotPanicsf(t, creator, "Paniced when creating pipeline")
-	assert.NotNilf(t, rawErr, "Unexpected Error not returned when making pipeline with a routine with a faulty initialise")
+	assert.NotNilf(t, rawErr, "Unexpected Error not returned when making pipeline with a routine with no impl")
 	assert.Nilf(t, pipeline, "Unexpected pipeline returned, should be nil")
-	assert.IsTypef(t, &abstractpipeline.InitialiseError{}, rawErr, "Unexpected error type returned by faulty initialiser routine, expecting %s, got %T", "InitialiseError", err)
+	assert.IsTypef(t, &abstractpipeline.InitialiseError{}, rawErr, "Unexpected error type returned by nil impl routine, expecting %s, got %T", "InitialiseError", err)
+	initialiseErr, ok := rawErr.(*abstractpipeline.InitialiseError)
+	assert.Equalf(t, ok, true, "Type assertion error on error returned from pipeline")
+	assert.NotNilf(t, initialiseErr.GenErr.PreviousError, "Previous err was nil - not expected")
+	previousErrText := initialiseErr.GenErr.PreviousError.Error()
+	assert.Containsf(t, previousErrText, "failed to initialise as it had no Impl assigned", "Expected previous error to contain \"failed to initialise as it had no Impl assigned\".  Previous Error text was %s", previousErrText)
 }
 
 func makePipeline(routineIDs ...int) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
