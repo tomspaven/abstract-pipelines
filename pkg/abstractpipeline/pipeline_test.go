@@ -4,6 +4,7 @@ import (
 	"abstract-pipelines/pkg/abstractpipeline"
 	"bytes"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -170,10 +171,16 @@ func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 	assert.Nilf(t, err, "Error returned when making pipeline")
 	assert.NotNilf(t, pipeline, "Unexpected nil pipeline returned")
 
+	recordsSentChan := make(chan int)
 	go func() {
-		for datastring := range generateInfiniteRandomStrings() {
+		recordsSent := 0
+		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja", "Goji Berry", "Chia Seed"} {
 			pipelineIn <- datastring
+			recordsSent++
 		}
+		_ = <-pipeline.Stop()
+		recordsSentChan <- recordsSent
+
 	}()
 
 	wgs := waitGroups{
@@ -185,7 +192,7 @@ func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 	wgs.end.Add(2)
 
 	drinkFromStringPipeAndAssertUnexpected(pipeline, t, wgs) // We don't want any data out - teflon just drops it and feeds to error pipe.
-	drinkFromErrorPipeAndAssert(pipeline, t, wgs, func(rawOutErr error) {
+	errorsReceivedChan := drinkFromErrorPipeAndAssert(pipeline, t, wgs, func(rawOutErr error) {
 		assert.IsTypef(t, &abstractpipeline.GeneralError{}, rawOutErr, "Unexpected error type returned by teflon processor routine, expecting %s, got %T", "GeneralError", rawOutErr)
 		generalErr, ok := rawOutErr.(*abstractpipeline.GeneralError)
 		assert.Equalf(t, ok, true, "Type assertion error on error returned from pipeline error out")
@@ -195,19 +202,14 @@ func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 	})
 	wgs.start.Wait()
 
-	terminatePipelineTicker := time.NewTicker(time.Millisecond * terminateTestLengthMilliseconds)
-	<-terminatePipelineTicker.C
-
-	var stopSuccess struct{}
-	stopFunc := func() {
-		stopSuccess = <-pipeline.Stop()
-	}
-
-	assert.NotPanicsf(t, stopFunc, "Paniced when stopping pipeline")
-	assert.NotNilf(t, stopSuccess, "Nil returned from pipeline StopFunc channel")
-
 	checkEmptyErrorLogAndAssert(t)
 	wgs.end.Wait()
+
+	recordsSent := <-recordsSentChan
+	errorsReceived := <-errorsReceivedChan
+
+	fmt.Println(fmt.Sprintf("Send %d records and got %d errors", recordsSent, errorsReceived))
+	assert.Equalf(t, recordsSent, errorsReceived, "Didn't receive the same number of errors out as messages pushed into the pipeline. Pushed %d, got %d errors", recordsSent, errorsReceived)
 
 }
 
@@ -234,8 +236,8 @@ type waitGroups struct {
 	end   *sync.WaitGroup
 }
 
-func drinkFromErrorPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wgs waitGroups, errorAsserter func(rawOutErr error)) {
-
+func drinkFromErrorPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing.T, wgs waitGroups, errorAsserter func(rawOutErr error)) (numErrorsChan chan int) {
+	numErrorsChan = make(chan int)
 	numRead := 0
 	wgs.start.Done()
 	go func() {
@@ -246,7 +248,9 @@ func drinkFromErrorPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testing
 
 		assert.NotEqualf(t, numRead, 0, "Didn't get at least one error on the error pipe when errors were expected")
 		wgs.end.Done()
+		numErrorsChan <- numRead
 	}()
+	return numErrorsChan
 }
 func drinkFromErrorPipeAndAssertUnexpected(pipeline *abstractpipeline.Pipeline, t *testing.T, wgs waitGroups) {
 	wgs.start.Done()
