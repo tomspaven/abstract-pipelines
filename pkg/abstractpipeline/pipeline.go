@@ -33,14 +33,14 @@ func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*Routine) (
 	}
 
 	pipeline.logHorizontalRule()
-	pipeline.logStarting("Pipeline", 1)
+	pipeline.logStarting(pipelineName, 1)
 
 	prepareRoutines(routines, loggers)
 	if err := pipeline.stitchPipeline(sourceInPipe, routines); err != nil {
 		return nil, err
 	}
 
-	pipeline.logStarted("Pipeline", 1)
+	pipeline.logStarted(pipelineName, 1)
 	pipeline.logHorizontalRule()
 	return pipeline, nil
 }
@@ -74,19 +74,12 @@ func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines
 		terminateCallbackOut: pipeline.terminateCallbackPipe,
 	}
 
-	for routineID, routine := range routines {
-		if routineID == firstRoutineID {
-			// Stitch first routine to the "gateway"
-			if nextOutPipes, err = pipeline.startRoutineAndLinkToPipeline(routines[firstRoutineID], sourceOutputPipes); err != nil {
-				return err
-			}
-			continue
-		}
-		// Stitch remaining routines to each other
-		prevInPipes := nextOutPipes
+	prevInPipes := sourceOutputPipes
+	for _, routine := range routines {
 		if nextOutPipes, err = pipeline.startRoutineAndLinkToPipeline(routine, prevInPipes); err != nil {
 			return err
 		}
+		prevInPipes = nextOutPipes
 	}
 
 	lastOutPipes := nextOutPipes
