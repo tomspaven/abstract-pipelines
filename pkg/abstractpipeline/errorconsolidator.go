@@ -1,14 +1,24 @@
 package abstractpipeline
 
-func (pipeline *Pipeline) startErrorConsolidatorAndMerge(routineErrorOutPipe chan error, errConsID int) {
+import "fmt"
 
-	pipeline.logStarted(errorConsolidatorName, errConsID)
+func (routine *Routine) startErrorConsolidatorAndMerge(routineErrorOutPipe, pipelineConsolidatedOutPipe chan error, subRoutineID int) {
+
+	routine.logErrorConsolidatorStarted(subRoutineID)
 
 	go func() {
-		defer pipeline.logTerminated(errorConsolidatorName, errConsID)
+		defer routine.logErrorConsolidatorTerminated(subRoutineID)
 		for errorFromRoutine := range routineErrorOutPipe {
-			pipeline.ErrorOutPipe <- errorFromRoutine
+			pipelineConsolidatedOutPipe <- errorFromRoutine
 		}
 	}()
 	return
+}
+
+func (routine *Routine) logErrorConsolidatorStarted(subRoutineID int) {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("Error consolidator started for routine/subroutine %s/%d.", routine.name, routine.numSubRoutines))
+}
+
+func (routine *Routine) logErrorConsolidatorTerminated(subRoutineID int) {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("Error consolidator terminated for routine/subroutine %s/%d.", routine.name, routine.numSubRoutines))
 }

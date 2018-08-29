@@ -31,26 +31,28 @@ var routineNameDictionary = map[int]string{
 	HANDLED_PROCESS_ERR_ROUTINE: "Handled",
 }
 
-func createRoutineFactoryMethod(id int) *abstractpipeline.Routine {
+func createRoutineFactoryMethod(id int, errorAsserter func(err error)) *abstractpipeline.Routine {
+	var err error
 	routine := &abstractpipeline.Routine{}
 	switch id {
 	case PRINT_ROUTINE:
-		routine.Impl = &StringPrinter{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &StringPrinter{}, 1)
 	case APPEND_ROUTINE:
-		routine.Impl = &StringAppender{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &StringAppender{}, 1)
 	case INIT_ERR_ROUTINE:
-		routine.Impl = &InitErrorer{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &InitErrorer{}, 1)
 	case COUNTER_ROUTINE:
-		routine.Impl = &RecordCounter{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &RecordCounter{}, 1)
 	case NO_IMPL_ROUTINE:
-		routine.Impl = nil
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], nil, 1)
 	case TEFLON_PROCESS_ERR_ROUTINE:
-		routine.Impl = &TeflonProcessErrorer{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &TeflonProcessErrorer{}, 1)
 	case HANDLED_PROCESS_ERR_ROUTINE:
-		routine.Impl = &HandledProcessErrorer{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &HandledProcessErrorer{}, 1)
 	default:
-		routine.Impl = &InitErrorer{}
+		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &InitErrorer{}, 1)
 	}
+	errorAsserter(err)
 	return routine
 }
 

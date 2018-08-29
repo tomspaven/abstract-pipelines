@@ -47,10 +47,10 @@ func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*Routine) (
 
 func prepareRoutines(routines []*Routine, loggers Loggers) {
 	wg := &sync.WaitGroup{}
-	wg.Add(len(routines))
 	wg.Add(numberOfTerminationMonitorRoutines)
 
 	for routineID, routine := range routines {
+		wg.Add(routine.numberOfSubroutinesNeedingSynchonisedStart())
 		routine.id = routineID
 		routine.cntl = routineController{
 			startWaitGroup: wg,
@@ -80,6 +80,7 @@ func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines
 			return err
 		}
 		prevInPipes = nextOutPipes
+
 	}
 
 	lastOutPipes := nextOutPipes
@@ -97,14 +98,13 @@ func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routine *Routine, prevRo
 		dataIn:              prevRoutinesOutPipes.dataOut,
 		terminateCallbackIn: prevRoutinesOutPipes.terminateCallbackOut,
 	}
-	if newOutputPipes, err = routine.startAndGetOutputPipes(inPipes); err != nil {
+	if newOutputPipes, err = routine.startAndGetOutputPipes(inPipes, pipeline.ErrorOutPipe); err != nil {
 		return nil, err
 	}
 	if err = routine.validateRoutineOutputPipes(newOutputPipes); err != nil {
 		return nil, err
 	}
 
-	pipeline.startErrorConsolidatorAndMerge(newOutputPipes.errOut, routine.id)
 	return newOutputPipes, nil
 }
 
