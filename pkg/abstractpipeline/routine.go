@@ -69,58 +69,78 @@ type inputPipes struct {
 	terminateCallbackIn chan chan struct{}
 }
 
-func (routine *RoutineSet) startAndGetOutputPipes(inPipes *inputPipes, pipelineConolidatedErrOutPipe chan error) (*outputPipes, error) {
+// Spawn a routine, associated error consolidater for each required routine in the set.
+// Also spawn a single terminate signal broadcaster and output pipe merger shared across all routines if more than
+// one in the set. Stitch all channels together as per the design.
+func (routineset *RoutineSet) startAllAndGetOutputPipes(inPipes *inputPipes, pipelineConsolidatedErrOutPipe chan error) (*outputPipes, error) {
 
-	if err := routine.validate(); err != nil {
+	if err := routineset.validate(); err != nil {
 		return nil, err
 	}
+	// Obtain output pipes for all routines in this routine group.
+	// The termination broadcaster will broadcast the termination signal to all routines in the routine set.
+	// The output pipes will be merged into a single terminate and data output pipe for the set by the outputmerger
+	// routine later
+	terminatePipesAllRoutines := routineset.startTerminationBroadcaster(inPipes.terminateCallbackIn)
+	dataOutputPipesAllRoutines := make([]*outputPipes, routineset.numRoutines)
 
-	allTerminateCallbackPipes := routine.startTerminationBroadcaster(inPipes.terminateCallbackIn)
-	allSubRoutineOutPipes := make([]*outputPipes, routine.numRoutines)
-
-	for i := 0; i < routine.numRoutines; i++ {
+	for i := 0; i < routineset.numRoutines; i++ {
 		subRoutineID := i + 1
 		subRoutineInPipes := &inputPipes{
 			inPipes.dataIn,
-			allTerminateCallbackPipes[i],
+			terminatePipesAllRoutines[i],
 		}
 
-		currentSubRoutineOutputPipes := &outputPipes{
-			dataOut:              make(chan interface{}),
-			terminateCallbackOut: make(chan chan struct{}),
-			errOut:               make(chan error),
+		var err error
+		dataOutputPipesAllRoutines[i], err = routineset.startRoutineInstanceAndGetOutPipes(subRoutineID, subRoutineInPipes)
+		if err != nil {
+			return nil, err
 		}
 
-		allSubRoutineOutPipes[i] = currentSubRoutineOutputPipes
-
-		if err := routine.impl.Initialise(); err != nil {
-			return nil, &InitialiseError{NewGeneralError(routine.name, err)}
+		consolidatorID := fmt.Sprintf("%s:%d", routineset.name, subRoutineID)
+		errorConsolidator := newRoutineSetErrorConsolidator(consolidatorID, routineset.cntl.log.OutLog)
+		err = errorConsolidator.startConsolidatorAndMerge(dataOutputPipesAllRoutines[i].errOut, pipelineConsolidatedErrOutPipe)
+		if err != nil {
+			return nil, err
 		}
-
-		routine.startErrorConsolidatorAndMerge(currentSubRoutineOutputPipes.errOut, pipelineConolidatedErrOutPipe, subRoutineID)
-
-		routine.logStarted(subRoutineID)
-		routine.cntl.startWaitGroup.Done()
-
-		go func(subRoutineID int) {
-		routineLoop:
-			for {
-				select {
-				case terminationSignal := <-subRoutineInPipes.terminateCallbackIn:
-					routine.logTerminateSignalReceived(subRoutineID)
-					routine.terminate(currentSubRoutineOutputPipes, terminationSignal, subRoutineID)
-					break routineLoop
-
-				case data := <-inPipes.dataIn:
-					err := routine.impl.Process(data, currentSubRoutineOutputPipes.dataOut)
-					routine.checkAndHandleError(err, data, currentSubRoutineOutputPipes)
-				}
-			}
-		}(subRoutineID)
 	}
 
-	mergedOutPipes := routine.startSubRoutineOutPipeMergers(allSubRoutineOutPipes)
+	mergedOutPipes := routineset.mergeRoutineOutPipes(dataOutputPipesAllRoutines)
 	return mergedOutPipes, nil
+}
+
+func (routine *RoutineSet) startRoutineInstanceAndGetOutPipes(subRoutineID int, inputPipes *inputPipes) (*outputPipes, error) {
+
+	outputPipes := &outputPipes{
+		dataOut:              make(chan interface{}),
+		terminateCallbackOut: make(chan chan struct{}),
+		errOut:               make(chan error),
+	}
+
+	if err := routine.impl.Initialise(); err != nil {
+		return nil, &InitialiseError{NewGeneralError(routine.name, err)}
+	}
+
+	routine.logStarted(subRoutineID)
+	routine.cntl.startWaitGroup.Done()
+
+	go func(subRoutineID int) {
+	routineLoop:
+		for {
+			select {
+			case terminationSignal := <-inputPipes.terminateCallbackIn:
+				routine.logTerminateSignalReceived(subRoutineID)
+				routine.terminate(outputPipes, terminationSignal, subRoutineID)
+				break routineLoop
+
+			case data := <-inputPipes.dataIn:
+				err := routine.impl.Process(data, outputPipes.dataOut)
+				routine.checkAndHandleError(err, data, outputPipes)
+			}
+		}
+	}(subRoutineID)
+
+	return outputPipes, nil
 }
 
 func (routine *RoutineSet) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}, subRoutineID int) {

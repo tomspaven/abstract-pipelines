@@ -93,15 +93,15 @@ func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines
 	return nil
 }
 
-func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routine *RoutineSet, prevRoutinesOutPipes *outputPipes) (newOutputPipes *outputPipes, err error) {
+func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routineset *RoutineSet, prevRoutinesOutPipes *outputPipes) (newOutputPipes *outputPipes, err error) {
 	inPipes := &inputPipes{
 		dataIn:              prevRoutinesOutPipes.dataOut,
 		terminateCallbackIn: prevRoutinesOutPipes.terminateCallbackOut,
 	}
-	if newOutputPipes, err = routine.startAndGetOutputPipes(inPipes, pipeline.ErrorOutPipe); err != nil {
+	if newOutputPipes, err = routineset.startAllAndGetOutputPipes(inPipes, pipeline.ErrorOutPipe); err != nil {
 		return nil, err
 	}
-	if err = routine.validateRoutineOutputPipes(newOutputPipes); err != nil {
+	if err = routineset.validateRoutineOutputPipes(newOutputPipes); err != nil {
 		return nil, err
 	}
 

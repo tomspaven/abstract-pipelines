@@ -1,9 +1,14 @@
 package abstractpipeline
 
-func (routine *RoutineSet) startSubRoutineOutPipeMergers(allSubRoutineOutPipes []*outputPipes) (mergedOutputPipes *outputPipes) {
+func (routineset *RoutineSet) isOutputPipeMergerRequired() bool {
+	if routineset.numRoutines > 1 {
+		return true
+	}
+	return false
+}
+func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputPipes) (mergedOutputPipes *outputPipes) {
 
-	// Nothing to merge if only one subroutine
-	if routine.numRoutines == 1 {
+	if !routine.isOutputPipeMergerRequired() {
 		return allSubRoutineOutPipes[firstRoutineID]
 	}
 
