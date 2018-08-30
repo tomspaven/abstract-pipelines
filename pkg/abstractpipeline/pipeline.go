@@ -60,6 +60,17 @@ func prepareRoutines(routines []*RoutineSet, loggers Loggers) {
 	return
 }
 
+type outputPipes struct {
+	dataOut              chan interface{}
+	terminateCallbackOut chan chan struct{}
+	errOut               chan error
+}
+
+type inputPipes struct {
+	dataIn              chan interface{}
+	terminateCallbackIn chan chan struct{}
+}
+
 const (
 	firstRoutineID int = 0
 )

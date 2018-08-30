@@ -36,21 +36,21 @@ func createRoutineFactoryMethod(id int, errorAsserter func(err error)) *abstract
 	routine := &abstractpipeline.RoutineSet{}
 	switch id {
 	case PRINT_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &StringPrinter{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &StringPrinter{}, 1)
 	case APPEND_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &StringAppender{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &StringAppender{}, 1)
 	case INIT_ERR_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &InitErrorer{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &InitErrorer{}, 1)
 	case COUNTER_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &RecordCounter{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &RecordCounter{}, 1)
 	case NO_IMPL_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], nil, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], nil, 1)
 	case TEFLON_PROCESS_ERR_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &TeflonProcessErrorer{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &TeflonProcessErrorer{}, 1)
 	case HANDLED_PROCESS_ERR_ROUTINE:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &HandledProcessErrorer{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &HandledProcessErrorer{}, 1)
 	default:
-		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &InitErrorer{}, 1)
+		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &InitErrorer{}, 1)
 	}
 	errorAsserter(err)
 	return routine
