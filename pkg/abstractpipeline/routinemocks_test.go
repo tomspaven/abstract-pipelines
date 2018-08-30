@@ -31,9 +31,9 @@ var routineNameDictionary = map[int]string{
 	HANDLED_PROCESS_ERR_ROUTINE: "Handled",
 }
 
-func createRoutineFactoryMethod(id int, errorAsserter func(err error)) *abstractpipeline.Routine {
+func createRoutineFactoryMethod(id int, errorAsserter func(err error)) *abstractpipeline.RoutineSet {
 	var err error
-	routine := &abstractpipeline.Routine{}
+	routine := &abstractpipeline.RoutineSet{}
 	switch id {
 	case PRINT_ROUTINE:
 		routine, err = abstractpipeline.NewRoutine(routineNameDictionary[id], &StringPrinter{}, 1)

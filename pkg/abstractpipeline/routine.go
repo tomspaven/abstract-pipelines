@@ -5,34 +5,34 @@ import (
 	"sync"
 )
 
-type Routine struct {
-	name           string
-	impl           Processor
-	numSubRoutines int
-	id             int
-	cntl           routineController
+type RoutineSet struct {
+	name        string
+	impl        Routine
+	numRoutines int
+	id          int
+	cntl        routineSetController
 }
 
-type Processor interface {
+type Routine interface {
 	Initialise() error
 	Terminate() error
 	Process(data interface{}, outputDataPipe chan<- interface{}) error
 	HandleDataProcessError(err error, data interface{}, outputDataPipe chan<- interface{}) error
 }
 
-type routineController struct {
+type routineSetController struct {
 	startWaitGroup *sync.WaitGroup
 	log            Loggers
 }
 
 const unknownRoutineName string = "Unknown"
 
-func NewRoutine(routineName string, routineImpl Processor, numSubRoutines int) (*Routine, error) {
+func NewRoutine(routineName string, routineImpl Routine, numSubRoutines int) (*RoutineSet, error) {
 
-	candidateRoutine := &Routine{
-		name:           routineName,
-		impl:           routineImpl,
-		numSubRoutines: numSubRoutines,
+	candidateRoutine := &RoutineSet{
+		name:        routineName,
+		impl:        routineImpl,
+		numRoutines: numSubRoutines,
 	}
 
 	if err := candidateRoutine.validate(); err != nil {
@@ -42,13 +42,13 @@ func NewRoutine(routineName string, routineImpl Processor, numSubRoutines int) (
 	return candidateRoutine, nil
 }
 
-func (routine *Routine) validate() error {
+func (routine *RoutineSet) validate() error {
 	if routine.name == "" {
 		routine.name = unknownRoutineName
 	}
 
-	if routine.numSubRoutines < 1 {
-		routine.numSubRoutines = 1
+	if routine.numRoutines < 1 {
+		routine.numRoutines = 1
 	}
 
 	if routine.impl == nil {
@@ -69,16 +69,16 @@ type inputPipes struct {
 	terminateCallbackIn chan chan struct{}
 }
 
-func (routine *Routine) startAndGetOutputPipes(inPipes *inputPipes, pipelineConolidatedErrOutPipe chan error) (*outputPipes, error) {
+func (routine *RoutineSet) startAndGetOutputPipes(inPipes *inputPipes, pipelineConolidatedErrOutPipe chan error) (*outputPipes, error) {
 
 	if err := routine.validate(); err != nil {
 		return nil, err
 	}
 
 	allTerminateCallbackPipes := routine.startTerminationBroadcaster(inPipes.terminateCallbackIn)
-	allSubRoutineOutPipes := make([]*outputPipes, routine.numSubRoutines)
+	allSubRoutineOutPipes := make([]*outputPipes, routine.numRoutines)
 
-	for i := 0; i < routine.numSubRoutines; i++ {
+	for i := 0; i < routine.numRoutines; i++ {
 		subRoutineID := i + 1
 		subRoutineInPipes := &inputPipes{
 			inPipes.dataIn,
@@ -123,7 +123,7 @@ func (routine *Routine) startAndGetOutputPipes(inPipes *inputPipes, pipelineCono
 	return mergedOutPipes, nil
 }
 
-func (routine *Routine) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}, subRoutineID int) {
+func (routine *RoutineSet) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}, subRoutineID int) {
 	err := routine.impl.Terminate()
 	checkAndForwardError(err, outPipes.errOut)
 	outPipes.terminateCallbackOut <- terminateSuccessPipe // Propogate termination callback upstream
@@ -136,25 +136,25 @@ func (routine *Routine) terminate(outPipes *outputPipes, terminateSuccessPipe ch
 }
 
 const supplementaryRoutines = 2 // broadcaster and merger
-func (routine *Routine) numberOfSubroutinesNeedingSynchonisedStart() int {
+func (routine *RoutineSet) numberOfSubroutinesNeedingSynchonisedStart() int {
 
-	if routine.numSubRoutines == 1 {
+	if routine.numRoutines == 1 {
 		return 1
 	}
-	return routine.numSubRoutines + supplementaryRoutines
+	return routine.numRoutines + supplementaryRoutines
 }
 
-func (routine *Routine) logStarted(subRoutineID int) {
-	routine.cntl.log.OutLog.Println(fmt.Sprintf("%s routine started (ID %d/%d)!", routine.name, subRoutineID, routine.numSubRoutines))
+func (routine *RoutineSet) logStarted(subRoutineID int) {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("%s routine started (ID %d/%d)!", routine.name, subRoutineID, routine.numRoutines))
 }
-func (routine *Routine) logTerminateSignalReceived(subRoutineID int) {
-	routine.cntl.log.OutLog.Println(fmt.Sprintf("Terminate signal received for %s Routine ID (%d/%d)", routine.name, subRoutineID, routine.numSubRoutines))
+func (routine *RoutineSet) logTerminateSignalReceived(subRoutineID int) {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("Terminate signal received for %s Routine ID (%d/%d)", routine.name, subRoutineID, routine.numRoutines))
 }
-func (routine *Routine) logTerminated(subRoutineID int) {
-	routine.cntl.log.OutLog.Println(fmt.Sprintf("%s routine terminated! (ID %d/%d)", routine.name, subRoutineID, routine.numSubRoutines))
+func (routine *RoutineSet) logTerminated(subRoutineID int) {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("%s routine terminated! (ID %d/%d)", routine.name, subRoutineID, routine.numRoutines))
 }
 
-func (routine *Routine) checkAndLogError(err error) {
+func (routine *RoutineSet) checkAndLogError(err error) {
 	if err != nil {
 		routine.cntl.log.ErrLog.Println(err.Error())
 	}
@@ -170,7 +170,7 @@ func checkAndForwardError(err error, errPipe chan<- error) {
 
 // The routine might be able to handle the error in it's implementation.  If not, feed it to the
 // general error output pipe.
-func (routine *Routine) checkAndHandleError(err error, data interface{}, outPipes *outputPipes) {
+func (routine *RoutineSet) checkAndHandleError(err error, data interface{}, outPipes *outputPipes) {
 	if err != nil {
 		if unhandledError := routine.impl.HandleDataProcessError(err, data, outPipes.dataOut); unhandledError != nil {
 			outPipes.errOut <- unhandledError
@@ -178,7 +178,7 @@ func (routine *Routine) checkAndHandleError(err error, data interface{}, outPipe
 	}
 }
 
-func (routine *Routine) validateRoutineOutputPipes(outPipes *outputPipes) error {
+func (routine *RoutineSet) validateRoutineOutputPipes(outPipes *outputPipes) error {
 	if outPipes == nil {
 		return &InitialiseError{NewGeneralError(routine.name, fmt.Errorf("Wiring error: Routine %s didn't return pipes at all", routine.name))}
 	}

@@ -24,7 +24,7 @@ type Loggers struct {
 	ErrLog *log.Logger
 }
 
-func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*Routine) (*Pipeline, error) {
+func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*RoutineSet) (*Pipeline, error) {
 
 	pipeline := &Pipeline{
 		terminateCallbackPipe: make(chan chan struct{}),
@@ -45,14 +45,14 @@ func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*Routine) (
 	return pipeline, nil
 }
 
-func prepareRoutines(routines []*Routine, loggers Loggers) {
+func prepareRoutines(routines []*RoutineSet, loggers Loggers) {
 	wg := &sync.WaitGroup{}
 	wg.Add(numberOfTerminationMonitorRoutines)
 
 	for routineID, routine := range routines {
 		wg.Add(routine.numberOfSubroutinesNeedingSynchonisedStart())
 		routine.id = routineID
-		routine.cntl = routineController{
+		routine.cntl = routineSetController{
 			startWaitGroup: wg,
 			log:            loggers,
 		}
@@ -64,7 +64,7 @@ const (
 	firstRoutineID int = 0
 )
 
-func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines []*Routine) error {
+func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines []*RoutineSet) error {
 	var nextOutPipes *outputPipes
 	var err error
 
@@ -93,7 +93,7 @@ func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines
 	return nil
 }
 
-func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routine *Routine, prevRoutinesOutPipes *outputPipes) (newOutputPipes *outputPipes, err error) {
+func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routine *RoutineSet, prevRoutinesOutPipes *outputPipes) (newOutputPipes *outputPipes, err error) {
 	inPipes := &inputPipes{
 		dataIn:              prevRoutinesOutPipes.dataOut,
 		terminateCallbackIn: prevRoutinesOutPipes.terminateCallbackOut,

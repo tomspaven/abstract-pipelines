@@ -2,15 +2,15 @@ package abstractpipeline
 
 import "fmt"
 
-func (routine *Routine) startTerminationBroadcaster(terminateCallbackIn chan chan struct{}) (terminateCallbackOutPipes []chan chan struct{}) {
+func (routine *RoutineSet) startTerminationBroadcaster(terminateCallbackIn chan chan struct{}) (terminateCallbackOutPipes []chan chan struct{}) {
 
-	terminateCallbackOutPipes = make([]chan chan struct{}, routine.numSubRoutines)
+	terminateCallbackOutPipes = make([]chan chan struct{}, routine.numRoutines)
 
-	for i := 0; i < routine.numSubRoutines; i++ {
+	for i := 0; i < routine.numRoutines; i++ {
 		terminateCallbackOutPipes[i] = make(chan chan struct{})
 	}
 
-	if routine.numSubRoutines == 1 {
+	if routine.numRoutines == 1 {
 		terminateCallbackOutPipes[firstRoutineID] = terminateCallbackIn
 		return
 	}
@@ -30,9 +30,9 @@ func (routine *Routine) startTerminationBroadcaster(terminateCallbackIn chan cha
 
 }
 
-func (routine *Routine) logTerminateBroadcasterStarted() {
-	routine.cntl.log.OutLog.Println(fmt.Sprintf("Termination Broadcaster started for routine group %s to fanout termination signals to %d subroutines.", routine.name, routine.numSubRoutines))
+func (routine *RoutineSet) logTerminateBroadcasterStarted() {
+	routine.cntl.log.OutLog.Println(fmt.Sprintf("Termination Broadcaster started for routine group %s to fanout termination signals to %d subroutines.", routine.name, routine.numRoutines))
 }
-func (routine *Routine) logTerminateBroadcasterTerminated() {
+func (routine *RoutineSet) logTerminateBroadcasterTerminated() {
 	routine.cntl.log.OutLog.Println(fmt.Sprintf("Termination Broadcaster terminated for routine group %s.", routine.name))
 }

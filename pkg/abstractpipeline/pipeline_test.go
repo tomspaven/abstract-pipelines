@@ -320,8 +320,8 @@ func drinkFromStringPipeAndAssert(pipeline *abstractpipeline.Pipeline, t *testin
 	}()
 }
 
-func generatePipelineRoutines(errorAsserter func(err error), testRoutineIDs ...int) []*abstractpipeline.Routine {
-	routines := make([]*abstractpipeline.Routine, len(testRoutineIDs))
+func generatePipelineRoutines(errorAsserter func(err error), testRoutineIDs ...int) []*abstractpipeline.RoutineSet {
+	routines := make([]*abstractpipeline.RoutineSet, len(testRoutineIDs))
 
 	for i, id := range testRoutineIDs {
 		routine := createRoutineFactoryMethod(id, errorAsserter)
