@@ -19,7 +19,6 @@ type routineSetController struct {
 }
 
 func NewRoutineSet(routineSetName string, routineImpl RoutineImpl, numRoutines int) (*RoutineSet, error) {
-
 	candidateRoutineSet := &RoutineSet{
 		name:        routineSetName,
 		impl:        routineImpl,
@@ -71,7 +70,7 @@ func (rSet *RoutineSet) startAllAndGetOutputPipes(inPipes *inputPipes, pipelineC
 		}
 
 		var err error
-		dataOutputPipesAllRoutines[i], err = rSet.spawnRoutine(currentRoutineInPipes, i)
+		dataOutputPipesAllRoutines[i], err = rSet.spawnRoutine(currentRoutineInPipes, routineIdx)
 		if err != nil {
 			return nil, err
 		}

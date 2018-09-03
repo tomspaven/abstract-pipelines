@@ -31,29 +31,30 @@ var routineNameDictionary = map[int]string{
 	HANDLED_PROCESS_ERR_ROUTINE: "Handled",
 }
 
-func createRoutineFactoryMethod(id int, errorAsserter func(err error)) *abstractpipeline.RoutineSet {
+func createRoutineSetFactoryMethod(routineSetCfg testRoutineSetCfg, errorAsserter func(err error)) *abstractpipeline.RoutineSet {
 	var err error
-	routine := &abstractpipeline.RoutineSet{}
+	routineSet := &abstractpipeline.RoutineSet{}
+	id := routineSetCfg.routineSetID
 	switch id {
 	case PRINT_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &StringPrinter{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &StringPrinter{}, routineSetCfg.numRoutines)
 	case APPEND_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &StringAppender{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &StringAppender{}, routineSetCfg.numRoutines)
 	case INIT_ERR_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &InitErrorer{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &InitErrorer{}, routineSetCfg.numRoutines)
 	case COUNTER_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &RecordCounter{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &RecordCounter{}, routineSetCfg.numRoutines)
 	case NO_IMPL_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], nil, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], nil, routineSetCfg.numRoutines)
 	case TEFLON_PROCESS_ERR_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &TeflonProcessErrorer{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &TeflonProcessErrorer{}, routineSetCfg.numRoutines)
 	case HANDLED_PROCESS_ERR_ROUTINE:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &HandledProcessErrorer{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &HandledProcessErrorer{}, routineSetCfg.numRoutines)
 	default:
-		routine, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &InitErrorer{}, 1)
+		routineSet, err = abstractpipeline.NewRoutineSet(routineNameDictionary[id], &InitErrorer{}, routineSetCfg.numRoutines)
 	}
 	errorAsserter(err)
-	return routine
+	return routineSet
 }
 
 type StringPrinter struct{}
