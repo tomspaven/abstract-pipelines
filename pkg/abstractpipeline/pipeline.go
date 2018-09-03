@@ -50,7 +50,7 @@ func prepareRoutines(routines []*RoutineSet, loggers Loggers) {
 	wg.Add(numberOfTerminationMonitorRoutines)
 
 	for routineID, routine := range routines {
-		wg.Add(routine.numberOfSubroutinesNeedingSynchonisedStart())
+		wg.Add(routine.numSynchStartRoutines())
 		routine.id = routineID
 		routine.cntl = routineSetController{
 			startWaitGroup: wg,
