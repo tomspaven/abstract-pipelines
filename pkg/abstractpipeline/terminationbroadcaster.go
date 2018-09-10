@@ -2,12 +2,12 @@ package abstractpipeline
 
 import "fmt"
 
-func (routine *RoutineSet) startTerminationBroadcaster(terminateCallbackIn chan chan struct{}) (terminateCallbackOutPipes []chan chan struct{}) {
+func (routine *RoutineSet) startTerminationBroadcaster(terminateCallbackIn terminationRqRsChan) (terminateCallbackOutPipes []terminationRqRsChan) {
 
-	terminateCallbackOutPipes = make([]chan chan struct{}, routine.numRoutines)
+	terminateCallbackOutPipes = make([]terminationRqRsChan, routine.numRoutines)
 
 	for i := 0; i < routine.numRoutines; i++ {
-		terminateCallbackOutPipes[i] = make(chan chan struct{})
+		terminateCallbackOutPipes[i] = make(terminationRqRsChan)
 	}
 
 	if routine.numRoutines == 1 {

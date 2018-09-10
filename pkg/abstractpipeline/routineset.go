@@ -53,7 +53,7 @@ func (rSet *RoutineSet) validate() error {
 // Spawn a routine, associated error consolidater for each required routine in the set.
 // Also spawn a single terminate signal broadcaster and output pipe merger shared across all routines if more than
 // one in the set. Stitch all channels together as per the design.
-func (rSet *RoutineSet) startAllAndGetOutputPipes(inPipes *inputPipes, pipelineConsolidatedErrOutPipe chan error) (*outputPipes, error) {
+func (rSet *RoutineSet) startAllAndGetOutputPipes(inPipes *inputPipes, pipelineConsolidatedErrOutPipe errorPipe) (*outputPipes, error) {
 
 	if err := rSet.validate(); err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (rSet *RoutineSet) numSynchStartRoutines() int {
 	return rSet.numRoutines + numBroadcasters + numMergers
 }
 
-func (rSet *RoutineSet) validateRoutineOutputPipes(outPipes *outputPipes) error {
+func (rSet *RoutineSet) validateOutputPipes(outPipes *outputPipes) error {
 	if outPipes == nil {
 		return &InitialiseError{NewGeneralError(rSet.name, fmt.Errorf("Wiring error: Routineset %s didn't return pipes at all", rSet.name))}
 	}

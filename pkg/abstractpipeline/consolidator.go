@@ -40,7 +40,7 @@ func (consolidator *routineSetErrorConsolidator) startConsolidatorAndMerge(out, 
 	return nil
 }
 
-func (consolidator *routineSetErrorConsolidator) typeAssertInPipes(inputPipes ...interface{}) (pipes []chan error, err error) {
+func (consolidator *routineSetErrorConsolidator) typeAssertInPipes(inputPipes ...interface{}) (pipes []errorPipe, err error) {
 
 	for i, rawPipe := range inputPipes {
 		if chanErrPipe, ok := rawPipe.(chan error); ok {

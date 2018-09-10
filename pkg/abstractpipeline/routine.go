@@ -26,9 +26,9 @@ func newRoutine(impl RoutineImpl, subRoutineID string, cntl routineSetController
 func (r *routine) startAndGetOutputPipes(inputPipes *inputPipes) (*outputPipes, error) {
 
 	outputPipes := &outputPipes{
-		dataOut:              make(chan interface{}),
-		terminateCallbackOut: make(chan chan struct{}),
-		errOut:               make(chan error),
+		dataOut:              make(dataPipe),
+		terminateCallbackOut: make(terminationRqRsChan),
+		errOut:               make(errorPipe),
 	}
 
 	if err := r.impl.Initialise(); err != nil {
@@ -58,7 +58,7 @@ func (r *routine) startAndGetOutputPipes(inputPipes *inputPipes) (*outputPipes, 
 
 }
 
-func (r *routine) terminate(outPipes *outputPipes, terminateSuccessPipe chan struct{}) {
+func (r *routine) terminate(outPipes *outputPipes, terminateSuccessPipe terminationResponseChan) {
 	err := r.impl.Terminate()
 	checkAndForwardError(err, outPipes.errOut)
 	outPipes.terminateCallbackOut <- terminateSuccessPipe // Propogate termination callback upstream

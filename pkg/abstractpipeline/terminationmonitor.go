@@ -15,7 +15,7 @@ const numberOfTerminationMonitorRoutines int = 1
 		   output channels before ultimately closing the consolidated output error
 		   pipe to the client
 */
-func (pipeline *Pipeline) startAndStitchTerminationMonitor(lastTerminateCallbackOut chan chan struct{}, startWg *sync.WaitGroup) {
+func (pipeline *Pipeline) startAndStitchTerminationMonitor(lastTerminateCallbackOut terminationRqRsChan, startWg *sync.WaitGroup) {
 
 	pipeline.logStarted(terminationMonitorName, 1)
 	startWg.Done()
@@ -29,6 +29,6 @@ func (pipeline *Pipeline) startAndStitchTerminationMonitor(lastTerminateCallback
 		terminateSuccess := <-lastTerminateCallbackOut
 		pipeline.logTerminateSignalReceived(terminationMonitorName, 1)
 		close(pipeline.ErrorOutPipe)
-		terminateSuccess <- struct{}{}
+		terminateSuccess <- terminationSignal{}
 	}()
 }

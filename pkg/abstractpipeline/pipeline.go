@@ -12,10 +12,17 @@ const (
 	terminationMonitorName        = "Termination Monitor"
 )
 
+type terminationRqRsChan chan chan struct{}
+type terminationResponseChan chan struct{}
+type terminationSignal struct{}
+
+type dataPipe chan interface{}
+type errorPipe chan error
+
 type Pipeline struct {
-	SinkOutPipe           chan interface{}
-	ErrorOutPipe          chan error
-	terminateCallbackPipe chan chan struct{}
+	SinkOutPipe           dataPipe
+	ErrorOutPipe          errorPipe
+	terminateCallbackPipe terminationRqRsChan
 	log                   Loggers
 }
 
@@ -24,19 +31,19 @@ type Loggers struct {
 	ErrLog *log.Logger
 }
 
-func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*RoutineSet) (*Pipeline, error) {
+func New(sourceInPipe chan interface{}, loggers Loggers, routineSets ...*RoutineSet) (*Pipeline, error) {
 
 	pipeline := &Pipeline{
-		terminateCallbackPipe: make(chan chan struct{}),
-		ErrorOutPipe:          make(chan error),
+		terminateCallbackPipe: make(terminationRqRsChan),
+		ErrorOutPipe:          make(errorPipe),
 		log:                   loggers,
 	}
 
 	pipeline.logHorizontalRule()
 	pipeline.logStarting(pipelineName, 1)
 
-	prepareRoutines(routines, loggers)
-	if err := pipeline.stitchPipeline(sourceInPipe, routines); err != nil {
+	prepareRoutineSets(routineSets, loggers)
+	if err := pipeline.stitchPipeline(sourceInPipe, routineSets); err != nil {
 		return nil, err
 	}
 
@@ -45,14 +52,14 @@ func New(sourceInPipe chan interface{}, loggers Loggers, routines ...*RoutineSet
 	return pipeline, nil
 }
 
-func prepareRoutines(routines []*RoutineSet, loggers Loggers) {
+func prepareRoutineSets(routineSets []*RoutineSet, loggers Loggers) {
 	wg := &sync.WaitGroup{}
 	wg.Add(numberOfTerminationMonitorRoutines)
 
-	for routineID, routine := range routines {
-		wg.Add(routine.numSynchStartRoutines())
-		routine.id = routineID
-		routine.cntl = routineSetController{
+	for routineSetID, routineSet := range routineSets {
+		wg.Add(routineSet.numSynchStartRoutines())
+		routineSet.id = routineSetID
+		routineSet.cntl = routineSetController{
 			startWaitGroup: wg,
 			log:            loggers,
 		}
@@ -61,21 +68,21 @@ func prepareRoutines(routines []*RoutineSet, loggers Loggers) {
 }
 
 type outputPipes struct {
-	dataOut              chan interface{}
-	terminateCallbackOut chan chan struct{}
-	errOut               chan error
+	dataOut              dataPipe
+	terminateCallbackOut terminationRqRsChan
+	errOut               errorPipe
 }
 
 type inputPipes struct {
-	dataIn              chan interface{}
-	terminateCallbackIn chan chan struct{}
+	dataIn              dataPipe
+	terminateCallbackIn terminationRqRsChan
 }
 
 const (
 	firstRoutineID int = 0
 )
 
-func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines []*RoutineSet) error {
+func (pipeline *Pipeline) stitchPipeline(sourceInPipe dataPipe, routineSets []*RoutineSet) error {
 	var nextOutPipes *outputPipes
 	var err error
 
@@ -86,8 +93,8 @@ func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines
 	}
 
 	prevInPipes := sourceOutputPipes
-	for _, routine := range routines {
-		if nextOutPipes, err = pipeline.startRoutineAndLinkToPipeline(routine, prevInPipes); err != nil {
+	for _, routineSet := range routineSets {
+		if nextOutPipes, err = pipeline.startRoutineSetAndLinkToPipeline(routineSet, prevInPipes); err != nil {
 			return err
 		}
 		prevInPipes = nextOutPipes
@@ -97,14 +104,14 @@ func (pipeline *Pipeline) stitchPipeline(sourceInPipe chan interface{}, routines
 	lastOutPipes := nextOutPipes
 	pipeline.SinkOutPipe = lastOutPipes.dataOut
 
-	wg := routines[firstRoutineID].cntl.startWaitGroup
+	wg := routineSets[firstRoutineID].cntl.startWaitGroup
 	pipeline.startAndStitchTerminationMonitor(lastOutPipes.terminateCallbackOut, wg)
 	wg.Wait()
 
 	return nil
 }
 
-func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routineset *RoutineSet, prevRoutinesOutPipes *outputPipes) (newOutputPipes *outputPipes, err error) {
+func (pipeline *Pipeline) startRoutineSetAndLinkToPipeline(routineset *RoutineSet, prevRoutinesOutPipes *outputPipes) (newOutputPipes *outputPipes, err error) {
 	inPipes := &inputPipes{
 		dataIn:              prevRoutinesOutPipes.dataOut,
 		terminateCallbackIn: prevRoutinesOutPipes.terminateCallbackOut,
@@ -112,7 +119,7 @@ func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routineset *RoutineSet, 
 	if newOutputPipes, err = routineset.startAllAndGetOutputPipes(inPipes, pipeline.ErrorOutPipe); err != nil {
 		return nil, err
 	}
-	if err = routineset.validateRoutineOutputPipes(newOutputPipes); err != nil {
+	if err = routineset.validateOutputPipes(newOutputPipes); err != nil {
 		return nil, err
 	}
 
@@ -121,7 +128,7 @@ func (pipeline *Pipeline) startRoutineAndLinkToPipeline(routineset *RoutineSet, 
 
 func (pipeline *Pipeline) Stop() (success <-chan struct{}) {
 	pipeline.logHorizontalRule()
-	terminateSuccess := make(chan struct{})
+	terminateSuccess := make(terminationResponseChan)
 	pipeline.terminateCallbackPipe <- terminateSuccess
 	return terminateSuccess
 }

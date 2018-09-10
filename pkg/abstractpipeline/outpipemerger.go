@@ -2,9 +2,6 @@ package abstractpipeline
 
 import "sync"
 
-type terminationRqRsChan chan chan struct{}
-type terminationResponseChan chan struct{}
-
 func (routineset *RoutineSet) isOutputPipeMergerRequired() bool {
 	if routineset.numRoutines > 1 {
 		return true
@@ -18,7 +15,7 @@ func (routineSet *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outp
 	}
 
 	mergedOutputPipes = &outputPipes{
-		dataOut:              make(chan interface{}),
+		dataOut:              make(dataPipe),
 		terminateCallbackOut: make(terminationRqRsChan),
 	}
 
@@ -42,7 +39,7 @@ func startDataPipeMergersAndGetTerminationChans(allSubRoutineOutPipes []*outputP
 func startDataPipeMerger(subRoutineDataOut, mergedOutputPipes *outputPipes, terminateChan terminationRqRsChan) {
 	go func(subRoutineDataOut *outputPipes, terminateChan terminationRqRsChan) {
 		var doneRespChan terminationResponseChan
-		defer func() { doneRespChan <- struct{}{} }()
+		defer func() { doneRespChan <- terminationSignal{} }()
 
 	routineLoop:
 		for {
@@ -85,6 +82,7 @@ func terminateDataPipeMergersAndWait(dataMergerTerminators []terminationRqRsChan
 
 	for _, terminator := range dataMergerTerminators {
 		allDataMergersDeadWg.Add(1)
+
 		go func(dataMergerTerminator terminationRqRsChan) {
 			defer allDataMergersDeadWg.Done()
 			respChan := make(terminationResponseChan)
