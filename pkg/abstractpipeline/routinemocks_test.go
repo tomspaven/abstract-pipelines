@@ -94,10 +94,7 @@ func (appender *StringAppender) Process(data interface{}, outputPipe chan<- inte
 		return nil
 	}
 
-	generalError := abstractpipeline.NewGeneralError("StringAppender", nil)
-	err := abstractpipeline.NewTypeAssertionError(generalError, "string")
-
-	return err
+	return nil
 }
 
 type RecordCounter struct {

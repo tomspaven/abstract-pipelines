@@ -7,15 +7,12 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-var mockLog *MockLog
 
 var noErrorAsserter = func(err error) { return }
 
@@ -26,26 +23,62 @@ type testRoutineSetCfg struct {
 
 func TestNew(t *testing.T) {
 	var err error
-
+	loggers, lData := createLoggers()
 	assert.NotPanicsf(t, func() {
-		_, _, err = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1})
+		_, _, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
 }
 
 func TestTerminate(t *testing.T) {
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var stopSuccess struct{}
-
+	loggers, lData := createLoggers()
 	assert.NotPanicsf(t, func() {
-		_, pipeline, err = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1})
+		_, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 	assert.NotPanicsf(t, func() { <-pipeline.Stop() }, "Paniced when terminating pipeline")
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
 	assertTerminatedPipeline(t, stopSuccess, pipeline)
+}
+
+// Check we don't have any weird resource leaks by continually starting and terminating a pipeline for a period of time.
+func TestStartStopExhaust(t *testing.T) {
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var stopSuccess struct{}
+	loggers, lData := createLoggers()
+
+	ticker := time.NewTicker(time.Second * 2)
+	endWg := &sync.WaitGroup{}
+	endWg.Add(1)
+	go func() {
+		defer func() {
+			ticker.Stop()
+			endWg.Done()
+		}()
+
+	routineLoop:
+		for {
+			select {
+			case <-ticker.C:
+				break routineLoop
+			default:
+				assert.NotPanicsf(t, func() {
+					_, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 5}, testRoutineSetCfg{APPEND_ROUTINE, 5})
+				}, "Paniced when creating pipeline")
+				assert.Nilf(t, err, "Error returned when making pipeline")
+				assert.NotPanicsf(t, func() { <-pipeline.Stop() }, "Paniced when terminating pipeline")
+				checkEmptyErrorLogAndAssert(t, lData)
+				assertTerminatedPipeline(t, stopSuccess, pipeline)
+			}
+		}
+	}()
+	endWg.Wait()
+
 }
 
 func assertTerminatedPipeline(t *testing.T, stopSuccess struct{}, pipeline *abstractpipeline.Pipeline) {
@@ -68,9 +101,9 @@ func TestInputStingsStopWhenDone(t *testing.T) {
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
 	var stopSuccess struct{}
-
+	loggers, lData := createLoggers()
 	assert.NotPanicsf(t, func() {
-		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
+		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 
@@ -92,9 +125,52 @@ func TestInputStingsStopWhenDone(t *testing.T) {
 	drinkFromErrorPipeAndAssertUnexpected(pipeline, t, wgs)
 	wgs.start.Wait()
 
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
 	assertTerminatedPipeline(t, stopSuccess, pipeline)
 	wgs.end.Wait()
+}
+
+func TestInputStingsStopWhenDoneFanOut5(t *testing.T) {
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var pipelineIn chan<- interface{}
+	var stopSuccess struct{}
+	loggers, lData := createLoggers()
+
+	assert.NotPanicsf(t, func() {
+		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 5}, testRoutineSetCfg{APPEND_ROUTINE, 5}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
+	}, "Paniced when creating pipeline")
+	assert.Nilf(t, err, "Error returned when making pipeline")
+
+	go func() {
+		for _, datastring := range []string{"potato", "banana", "pineapple", "arancini", "n'duja"} {
+			pipelineIn <- datastring
+		}
+		stopSuccess = <-pipeline.Stop()
+	}()
+
+	wgs := waitGroups{
+		start: &sync.WaitGroup{},
+		end:   &sync.WaitGroup{},
+	}
+
+	wgs.start.Add(2)
+	wgs.end.Add(2)
+	drinkFromStringPipeAndAssert(pipeline, t, wgs, "PIPELINED")
+	drinkFromErrorPipeAndAssertUnexpected(pipeline, t, wgs)
+	wgs.start.Wait()
+
+	assertTerminatedPipeline(t, stopSuccess, pipeline)
+
+	checkEmptyErrorLogAndAssert(t, lData)
+	wgs.end.Wait()
+	//checkOutLogAndAssert(t, lData, "Routine Print 1/2 started", "Routine Print 1/2 started", "Routine Print 1/2 terminated!", "Routine Print 2/2 terminated!")
+}
+
+func checkOutLogAndAssert(t *testing.T, lData logData, checkStrings ...string) {
+	for _, checkString := range checkStrings {
+		assert.Containsf(t, string(lData.Out.Bytes()), checkString, "Log didn't contain string %s when it was expected", checkString)
+	}
 }
 
 const terminateTestLengthMilliseconds time.Duration = 1000
@@ -107,9 +183,10 @@ func TestNewAndStopAbruptly(t *testing.T) {
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
 	var stopSuccess struct{}
+	loggers, lData := createLoggers()
 
 	assert.NotPanicsf(t, func() {
-		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
+		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 
@@ -135,7 +212,46 @@ func TestNewAndStopAbruptly(t *testing.T) {
 
 	assert.NotPanicsf(t, func() { stopSuccess = <-pipeline.Stop() }, "Paniced when stopping pipeline")
 
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
+	assertTerminatedPipeline(t, stopSuccess, pipeline)
+	wgs.end.Wait()
+}
+
+func TestNewAndStopAbruptlyFanOut5(t *testing.T) {
+	var err error
+	var pipeline *abstractpipeline.Pipeline
+	var pipelineIn chan<- interface{}
+	var stopSuccess struct{}
+	loggers, lData := createLoggers()
+
+	assert.NotPanicsf(t, func() {
+		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 5}, testRoutineSetCfg{APPEND_ROUTINE, 5}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
+	}, "Paniced when creating pipeline")
+	assert.Nilf(t, err, "Error returned when making pipeline")
+
+	go func() {
+		for datastring := range generateInfiniteRandomStrings() {
+			pipelineIn <- datastring
+		}
+	}()
+
+	wgs := waitGroups{
+		start: &sync.WaitGroup{},
+		end:   &sync.WaitGroup{},
+	}
+
+	wgs.start.Add(2)
+	wgs.end.Add(2)
+	drinkFromStringPipeAndAssert(pipeline, t, wgs, "PIPELINED")
+	drinkFromErrorPipeAndAssertUnexpected(pipeline, t, wgs)
+	wgs.start.Wait()
+
+	terminatePipelineTicker := time.NewTicker(terminateTestLengthMilliseconds * time.Millisecond)
+	<-terminatePipelineTicker.C
+
+	assert.NotPanicsf(t, func() { stopSuccess = <-pipeline.Stop() }, "Paniced when stopping pipeline")
+
+	checkEmptyErrorLogAndAssert(t, lData)
 	assertTerminatedPipeline(t, stopSuccess, pipeline)
 	wgs.end.Wait()
 }
@@ -143,24 +259,25 @@ func TestNewAndStopAbruptly(t *testing.T) {
 func TestNewWithInitError(t *testing.T) {
 	var pipeline *abstractpipeline.Pipeline
 	var rawErr error
+	loggers, lData := createLoggers()
 
 	assert.NotPanicsf(t, func() {
-		_, pipeline, rawErr = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1}, testRoutineSetCfg{INIT_ERR_ROUTINE, 1})
+		_, pipeline, rawErr = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1}, testRoutineSetCfg{INIT_ERR_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	initialiseErr := assertOnInitialiseError(t, rawErr, pipeline)
 	previousErrText := initialiseErr.GenErr.PreviousError.Error()
 	assert.Containsf(t, previousErrText, "I threwz an error on initialisation din't i?", "Expected previous error to contain \"I threwz an error on initialisation din't i?\".  Previous Error text was %s", previousErrText)
 	assertTerminatedPipeline(t, struct{}{}, pipeline)
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
 }
 
 func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 	var err error
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
-
+	loggers, lData := createLoggers()
 	assert.NotPanicsf(t, func() {
-		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{TEFLON_PROCESS_ERR_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
+		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{TEFLON_PROCESS_ERR_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 	assert.NotNilf(t, pipeline, "Unexpected nil pipeline returned")
@@ -196,7 +313,7 @@ func TestWithRoutineThatJustDropsErrors(t *testing.T) {
 	})
 	wgs.start.Wait()
 
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
 	wgs.end.Wait()
 
 	recordsSent := <-recordsSentChan
@@ -211,9 +328,9 @@ func TestWithRoutineThatHandlesErrors(t *testing.T) {
 	var pipeline *abstractpipeline.Pipeline
 	var pipelineIn chan<- interface{}
 	var stopSuccess struct{}
-
+	loggers, lData := createLoggers()
 	assert.NotPanicsf(t, func() {
-		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{HANDLED_PROCESS_ERR_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
+		pipelineIn, pipeline, err = makePipeline(noErrorAsserter, loggers, testRoutineSetCfg{PRINT_ROUTINE, 1}, testRoutineSetCfg{APPEND_ROUTINE, 1}, testRoutineSetCfg{HANDLED_PROCESS_ERR_ROUTINE, 1}, testRoutineSetCfg{COUNTER_ROUTINE, 1})
 	}, "Paniced when creating pipeline")
 	assert.Nilf(t, err, "Error returned when making pipeline")
 
@@ -239,27 +356,26 @@ func TestWithRoutineThatHandlesErrors(t *testing.T) {
 
 	assert.NotPanicsf(t, func() { stopSuccess = <-pipeline.Stop() }, "Paniced when stopping pipeline")
 
-	checkEmptyErrorLogAndAssert(t)
+	checkEmptyErrorLogAndAssert(t, lData)
 	assertTerminatedPipeline(t, stopSuccess, pipeline)
 	wgs.end.Wait()
 }
 
-func makePipeline(errorAsserter func(err error), routineSetConfigs ...testRoutineSetCfg) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
+func makePipeline(errorAsserter func(err error), loggers abstractpipeline.Loggers, routineSetConfigs ...testRoutineSetCfg) (chan<- interface{}, *abstractpipeline.Pipeline, error) {
 	routineSets := generatePipelineRoutines(errorAsserter, routineSetConfigs...)
 	inputChan := make(chan interface{})
-	pipeline, err := abstractpipeline.New(inputChan, createLoggers(), routineSets...)
+	pipeline, err := abstractpipeline.New(inputChan, loggers, routineSets...)
 	return inputChan, pipeline, err
 }
 
-func checkEmptyErrorLogAndAssert(t *testing.T) {
-	bytes := mockLog.Err.Bytes()
+func checkEmptyErrorLogAndAssert(t *testing.T, lData logData) {
+	bytes := lData.Err.Bytes()
 	assert.Equalf(t, 0, len(bytes), "Expeted empty error log, but %s was there", string(bytes))
 }
 
-func checkExpectedErrorLogContentAndAssert(t *testing.T, expectedlogContent string) {
-	bytes := mockLog.Err.Bytes()
-	logString := string(bytes)
-	assert.Containsf(t, logString, expectedlogContent, "Expeted %s in error log, but %s was there", expectedlogContent, logString)
+func checkExpectedErrorLogContentAndAssert(t *testing.T, lData logData, expectedlogContent string) {
+	logString := string(lData.Err.Bytes())
+	assert.Containsf(t, string(lData.Err.Bytes()), expectedlogContent, "Expeted %s in error log, but %s was there", expectedlogContent, logString)
 }
 
 type waitGroups struct {
@@ -340,20 +456,24 @@ func generatePipelineRoutines(errorAsserter func(err error), routineSetCfgs ...t
 	return routineSets
 }
 
-func createLoggers() abstractpipeline.Loggers {
-	mockLog = &MockLog{
-		Out: &bytes.Buffer{},
-		Err: &bytes.Buffer{},
-	}
+type logData struct {
+	Out *bytes.Buffer
+	Err *bytes.Buffer
+}
+
+func createLoggers() (abstractpipeline.Loggers, logData) {
+
+	lData := logData{&bytes.Buffer{}, &bytes.Buffer{}}
+	mockLog := &MockLog{lData.Out, lData.Err}
 
 	logFlags := log.Ldate | log.Ltime | log.Lshortfile
 	loggers := abstractpipeline.Loggers{
-		//OutLog: log.New(mockLog.Out, "Info:", logFlags),
-		//ErrLog: log.New(mockLog.Err, "Error:", logFlags),
-		OutLog: log.New(os.Stdout, "Info:", logFlags),
-		ErrLog: log.New(os.Stderr, "Error:", logFlags),
+		OutLog: log.New(mockLog.Out, "Info:", logFlags),
+		ErrLog: log.New(mockLog.Err, "Error:", logFlags),
+		//OutLog: log.New(os.Stdout, "Info:", logFlags),
+		//ErrLog: log.New(os.Stderr, "Error:", logFlags),
 	}
-	return loggers
+	return loggers, lData
 }
 
 func generateInfiniteRandomStrings() <-chan string {
