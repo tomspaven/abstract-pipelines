@@ -23,25 +23,10 @@ func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputP
 
 	// Just pass through data received from all subroutines to the consolidated output pipe
 	var dataMergerTerminators []chan chan struct{}
-	for i, subRoutineDataOutPipe := range allSubRoutineOutPipes {
-		dataMergerTerminators = append(dataMergerTerminators, make(chan chan struct{}))
-		go func(subRoutineDataOut *outputPipes, terminateChan chan chan struct{}) {
-			var doneRespChan chan struct{}
-			defer func() { doneRespChan <- struct{}{} }()
-
-		routineLoop:
-			for {
-				select {
-				case doneRespChan = <-terminateChan:
-					break routineLoop
-				default:
-					for data := range subRoutineDataOut.dataOut {
-						mergedOutputPipes.dataOut <- data
-					}
-				}
-			}
-
-		}(subRoutineDataOutPipe, dataMergerTerminators[i])
+	for _, subRoutineDataOutPipe := range allSubRoutineOutPipes {
+		currentTerminator := make(chan chan struct{})
+		dataMergerTerminators = append(dataMergerTerminators, currentTerminator)
+		startDataMerger(subRoutineDataOutPipe, mergedOutputPipes, currentTerminator)
 	}
 
 	// This could be more performant.  Wait to receive a termination callback from all subroutines
@@ -75,4 +60,24 @@ func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputP
 
 	return
 
+}
+
+func startDataMerger(subRoutineDataOut, mergedOutputPipes *outputPipes, terminateChan chan chan struct{}) {
+	go func(subRoutineDataOut *outputPipes, terminateChan chan chan struct{}) {
+		var doneRespChan chan struct{}
+		defer func() { doneRespChan <- struct{}{} }()
+
+	routineLoop:
+		for {
+			select {
+			case doneRespChan = <-terminateChan:
+				break routineLoop
+			default:
+				for data := range subRoutineDataOut.dataOut {
+					mergedOutputPipes.dataOut <- data
+				}
+			}
+		}
+
+	}(subRoutineDataOut, terminateChan)
 }
