@@ -2,6 +2,8 @@ package abstractpipeline
 
 import "sync"
 
+type terminationRqRsChan chan chan struct{}
+
 func (routineset *RoutineSet) isOutputPipeMergerRequired() bool {
 	if routineset.numRoutines > 1 {
 		return true
@@ -16,18 +18,12 @@ func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputP
 
 	mergedOutputPipes = &outputPipes{
 		dataOut:              make(chan interface{}),
-		terminateCallbackOut: make(chan chan struct{}),
+		terminateCallbackOut: make(terminationRqRsChan),
 	}
 
 	defer routine.cntl.startWaitGroup.Done()
-
+	dataMergerTerminators := startDataPipeMergersAndGetTerminationChans(allSubRoutineOutPipes, mergedOutputPipes)
 	// Just pass through data received from all subroutines to the consolidated output pipe
-	var dataMergerTerminators []chan chan struct{}
-	for _, subRoutineDataOutPipe := range allSubRoutineOutPipes {
-		currentTerminator := make(chan chan struct{})
-		dataMergerTerminators = append(dataMergerTerminators, currentTerminator)
-		startDataMerger(subRoutineDataOutPipe, mergedOutputPipes, currentTerminator)
-	}
 
 	// This could be more performant.  Wait to receive a termination callback from all subroutines
 	// before killing all data mergers and propogating the termination callback to to the next routineset
@@ -42,7 +38,7 @@ func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputP
 
 		for _, terminator := range dataMergerTerminators {
 			allDataMergersDeadWg.Add(1)
-			go func(dataMergerTerminator chan chan struct{}) {
+			go func(dataMergerTerminator terminationRqRsChan) {
 				defer allDataMergersDeadWg.Done()
 				respChan := make(chan struct{})
 				dataMergerTerminator <- respChan
@@ -62,8 +58,18 @@ func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputP
 
 }
 
-func startDataMerger(subRoutineDataOut, mergedOutputPipes *outputPipes, terminateChan chan chan struct{}) {
-	go func(subRoutineDataOut *outputPipes, terminateChan chan chan struct{}) {
+func startDataPipeMergersAndGetTerminationChans(allSubRoutineOutPipes []*outputPipes, mergedOutputPipes *outputPipes) []terminationRqRsChan {
+	var dataMergerTerminators []terminationRqRsChan
+	for _, subRoutineDataOutPipe := range allSubRoutineOutPipes {
+		currentTerminator := make(terminationRqRsChan)
+		dataMergerTerminators = append(dataMergerTerminators, currentTerminator)
+		startDataPipeMerger(subRoutineDataOutPipe, mergedOutputPipes, currentTerminator)
+	}
+	return dataMergerTerminators
+}
+
+func startDataPipeMerger(subRoutineDataOut, mergedOutputPipes *outputPipes, terminateChan terminationRqRsChan) {
+	go func(subRoutineDataOut *outputPipes, terminateChan terminationRqRsChan) {
 		var doneRespChan chan struct{}
 		defer func() { doneRespChan <- struct{}{} }()
 
