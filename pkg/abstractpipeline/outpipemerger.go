@@ -3,6 +3,7 @@ package abstractpipeline
 import "sync"
 
 type terminationRqRsChan chan chan struct{}
+type terminationResponseChan chan struct{}
 
 func (routineset *RoutineSet) isOutputPipeMergerRequired() bool {
 	if routineset.numRoutines > 1 {
@@ -10,9 +11,9 @@ func (routineset *RoutineSet) isOutputPipeMergerRequired() bool {
 	}
 	return false
 }
-func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputPipes) (mergedOutputPipes *outputPipes) {
+func (routineSet *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputPipes) (mergedOutputPipes *outputPipes) {
 
-	if !routine.isOutputPipeMergerRequired() {
+	if !routineSet.isOutputPipeMergerRequired() {
 		return allSubRoutineOutPipes[firstRoutineID]
 	}
 
@@ -21,39 +22,9 @@ func (routine *RoutineSet) mergeRoutineOutPipes(allSubRoutineOutPipes []*outputP
 		terminateCallbackOut: make(terminationRqRsChan),
 	}
 
-	defer routine.cntl.startWaitGroup.Done()
+	defer routineSet.cntl.startWaitGroup.Done()
 	dataMergerTerminators := startDataPipeMergersAndGetTerminationChans(allSubRoutineOutPipes, mergedOutputPipes)
-	// Just pass through data received from all subroutines to the consolidated output pipe
-
-	// This could be more performant.  Wait to receive a termination callback from all subroutines
-	// before killing all data mergers and propogating the termination callback to to the next routineset
-	// and ultimately terminating the merger.
-	go func() {
-		var terminateCallback chan struct{}
-		for _, outPipes := range allSubRoutineOutPipes {
-			terminateCallback = <-outPipes.terminateCallbackOut
-		}
-
-		allDataMergersDeadWg := &sync.WaitGroup{}
-
-		for _, terminator := range dataMergerTerminators {
-			allDataMergersDeadWg.Add(1)
-			go func(dataMergerTerminator terminationRqRsChan) {
-				defer allDataMergersDeadWg.Done()
-				respChan := make(chan struct{})
-				dataMergerTerminator <- respChan
-				<-respChan
-			}(terminator)
-		}
-
-		allDataMergersDeadWg.Wait()
-
-		mergedOutputPipes.terminateCallbackOut <- terminateCallback
-		close(mergedOutputPipes.dataOut)
-		close(mergedOutputPipes.terminateCallbackOut)
-
-	}()
-
+	startTerminationSignalMerger(allSubRoutineOutPipes, mergedOutputPipes, dataMergerTerminators)
 	return
 
 }
@@ -70,7 +41,7 @@ func startDataPipeMergersAndGetTerminationChans(allSubRoutineOutPipes []*outputP
 
 func startDataPipeMerger(subRoutineDataOut, mergedOutputPipes *outputPipes, terminateChan terminationRqRsChan) {
 	go func(subRoutineDataOut *outputPipes, terminateChan terminationRqRsChan) {
-		var doneRespChan chan struct{}
+		var doneRespChan terminationResponseChan
 		defer func() { doneRespChan <- struct{}{} }()
 
 	routineLoop:
@@ -86,4 +57,41 @@ func startDataPipeMerger(subRoutineDataOut, mergedOutputPipes *outputPipes, term
 		}
 
 	}(subRoutineDataOut, terminateChan)
+}
+
+func startTerminationSignalMerger(allSubRoutineOutPipes []*outputPipes, mergedOutputPipes *outputPipes, dataMergerTerminators []terminationRqRsChan) {
+	// This could be more performant.  Wait to receive a termination callback from all subroutines
+	// before killing all data mergers and propogating the termination callback to to the next routineset
+	// and ultimately terminating the merger.
+	go func() {
+		terminateCallback := waitForAllRoutineTerminationSignals(allSubRoutineOutPipes)
+		terminateDataPipeMergersAndWait(dataMergerTerminators)
+		mergedOutputPipes.terminateCallbackOut <- terminateCallback
+		close(mergedOutputPipes.dataOut)
+		close(mergedOutputPipes.terminateCallbackOut)
+	}()
+}
+
+func waitForAllRoutineTerminationSignals(allSubRoutineOutPipes []*outputPipes) terminationResponseChan {
+	var terminateCallback terminationResponseChan
+	for _, outPipes := range allSubRoutineOutPipes {
+		terminateCallback = <-outPipes.terminateCallbackOut
+	}
+	return terminateCallback
+}
+
+func terminateDataPipeMergersAndWait(dataMergerTerminators []terminationRqRsChan) {
+	allDataMergersDeadWg := &sync.WaitGroup{}
+
+	for _, terminator := range dataMergerTerminators {
+		allDataMergersDeadWg.Add(1)
+		go func(dataMergerTerminator terminationRqRsChan) {
+			defer allDataMergersDeadWg.Done()
+			respChan := make(terminationResponseChan)
+			dataMergerTerminator <- respChan
+			<-respChan
+		}(terminator)
+	}
+
+	allDataMergersDeadWg.Wait()
 }
